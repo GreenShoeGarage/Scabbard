@@ -484,8 +484,19 @@
     }
     buildCornerStrips(mesh, W, D, r, ri, arc, zc, zCav, zTop);
 
-    // --- top rim annulus (faces up) between outer and inner at zTop ---
-    fillPolygon(mesh, outerR, [ensureCW(innerR)], function (x, y) { return [x, y, zTop]; }, false);
+    // --- top rim: flat annulus, or an O-ring groove when a gasket is requested ---
+    if (S.gasket && S.gasket.on) {
+      var gw = Math.min(S.gasket.width || 1.6, wall * 0.6);
+      var gd = Math.min(S.gasket.depth || 1.5, (zTop - zCav) * 0.5, wall);
+      if (gw >= 0.8 && (wall - gw) / 2 >= 0.5) {
+        buildGroovedRim(mesh, W, D, r, arc, wall, zTop, gw, gd);
+      } else {
+        if (S.warn) S.warn.push("Gasket groove skipped: the wall is too thin for a channel with solid lips. Thicken the wall.");
+        fillPolygon(mesh, outerR, [ensureCW(innerR)], function (x, y) { return [x, y, zTop]; }, false);
+      }
+    } else {
+      fillPolygon(mesh, outerR, [ensureCW(innerR)], function (x, y) { return [x, y, zTop]; }, false);
+    }
 
     // --- cavity floor (inner footprint at zCav, faces up) ---
     fillPolygon(mesh, inner, null, function (x, y) { return [x, y, zCav]; }, false);
@@ -494,6 +505,21 @@
 
     mesh.endBody();
     return { r: r, ri: ri, arc: arc, cham: cham, zCav: zCav, zTop: zTop };
+  }
+
+  // Grooved rim: replace the flat top annulus with an O-ring channel. Five
+  // concentric bands (outer land, outer wall, groove floor, inner wall, inner
+  // land), all rounded rects of equal vertex count so the rings stitch cleanly.
+  function buildGroovedRim(mesh, W, D, r, arc, wall, zTop, gw, gd) {
+    function ring(d) { return roundedRectPts(W - 2 * d, D - 2 * d, Math.max(0.3, r - d), arc); }
+    var outerR = ring(0), gOt = ring(wall / 2 - gw / 2), gIt = ring(wall / 2 + gw / 2), innerR = ring(wall);
+    var zf = zTop - gd;
+    function fz(z) { return function (x, y) { return [x, y, z]; }; }
+    fillPolygon(mesh, outerR, [ensureCW(gOt)], fz(zTop), false);   // outer land (up)
+    stitchRings(mesh, gOt, zTop, gOt, zf, true);                   // outer groove wall
+    fillPolygon(mesh, gOt, [ensureCW(gIt)], fz(zf), false);        // groove floor (up)
+    stitchRings(mesh, gIt, zf, gIt, zTop, true);                   // inner groove wall
+    fillPolygon(mesh, gIt, [ensureCW(innerR)], fz(zTop), false);   // inner land (up)
   }
 
   // stitch two rings (same length) into a skirt band; ptsA at zA, ptsB at zB
@@ -932,6 +958,137 @@
     return { bossR: bossR, boreR: boreR, z1: z1 };
   }
 
+  /* ======================================================= CASE MOUNTING
+     Additive bodies fused to the base: mounting-flange tabs (plain hole or
+     keyhole) and a printed DIN-rail cradle. All by construction, no CSG. */
+
+  // Keyhole outline as one CCW loop: a head circle (radius R) with a slot of
+  // width sw running length L in unit direction (dx,dy), ending in a semicircle.
+  function keyholeContour(cx, cy, R, sw, L, dx, dy) {
+    var hw = sw / 2, px = -dy, py = dx;                 // perpendicular unit
+    var t = Math.sqrt(Math.max(0, R * R - hw * hw));    // where slot sides meet the head circle
+    var aP = Math.atan2(py * hw + dy * t, px * hw + dx * t);   // angle of P+ on circle
+    var aM = Math.atan2(-py * hw + dy * t, -px * hw + dx * t); // angle of P- on circle
+    var pts = [];
+    // major arc of the head, from P- around the back (through -d) to P+
+    var back = Math.atan2(-dy, -dx);
+    var seg = 26;
+    // walk from aM to aP the long way (passing through 'back')
+    function norm(a) { while (a < 0) a += Math.PI * 2; return a; }
+    var start = norm(aM), end = norm(aP), bb = norm(back);
+    if (!(start < bb && bb < end)) { if (end < start) end += Math.PI * 2; }
+    if (end < start) end += Math.PI * 2;
+    for (var i = 0; i <= seg; i++) { var a = start + (end - start) * i / seg;
+      pts.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]); }
+    // down the +perp slot side to the end centre, then semicircle, then back up
+    var ecx = cx + dx * L, ecy = cy + dy * L;
+    var qPx = ecx + px * hw, qPy = ecy + py * hw;       // Q+
+    var qMx = ecx - px * hw, qMy = ecy - py * hw;       // Q-
+    pts.push([qPx, qPy]);
+    var a0 = Math.atan2(qPy - ecy, qPx - ecx), a1 = Math.atan2(qMy - ecy, qMx - ecx);
+    if (a1 < a0) a1 += Math.PI * 2;
+    for (var k = 1; k < 12; k++) { var aa = a0 + (a1 - a0) * k / 12;
+      pts.push([ecx + hw * Math.cos(aa), ecy + hw * Math.sin(aa)]); }
+    pts.push([qMx, qMy]);
+    return ensureCCW(pts);
+  }
+
+  // One flange tab on a wall, extending outward, with a plain or keyhole hole.
+  function buildMountTab(mesh, side, W, D, along, tabW, tabLen, thk, overlap, holeKind, screw) {
+    var out = { front: [0, -1], back: [0, 1], left: [-1, 0], right: [1, 0] }[side];
+    var horiz = (side === "left" || side === "right");
+    var faceX = W / 2, faceY = D / 2;
+    // tab centre: start at the wall face, go outward by tabLen/2 minus the overlap
+    var innerX, innerY;
+    if (side === "left")  { innerX = -faceX; innerY = along; }
+    else if (side === "right") { innerX = faceX; innerY = along; }
+    else if (side === "front") { innerX = along; innerY = -faceY; }
+    else { innerX = along; innerY = faceY; }
+    var cx = innerX + out[0] * (tabLen / 2 - overlap / 2);
+    var cy = innerY + out[1] * (tabLen / 2 - overlap / 2);
+    var longLen = tabLen + overlap;                 // along the outward axis
+    var boxW = horiz ? longLen : tabW;              // x-extent
+    var boxD = horiz ? tabW : longLen;              // y-extent
+    var contour = roundedRectPts(boxW, boxD, Math.min(3, tabW / 2 - 0.5), 6);
+    for (var i = 0; i < contour.length; i++) { contour[i][0] += cx; contour[i][1] += cy; }
+    // hole centre: out toward the free end
+    var hcx = cx + out[0] * (tabLen * 0.18), hcy = cy + out[1] * (tabLen * 0.18);
+    var holes = [];
+    if (holeKind === "keyhole") {
+      var R = screw * 1.15 + 1.2; // head clearance radius
+      // slot points inward (toward the wall / box), so you hang then slide out
+      holes.push(keyholeContour(hcx, hcy, R, screw + 0.6, tabLen * 0.4, -out[0], -out[1]));
+    } else {
+      holes.push(circlePts(hcx, hcy, (screw + 0.6) / 2, 24));
+    }
+    mesh.beginBody("mount");
+    fillPolygon(mesh, contour, holes, function (x, y) { return [x, y, thk]; }, false); // top
+    fillPolygon(mesh, contour, holes, function (x, y) { return [x, y, 0]; }, true);     // bottom
+    for (var e = 0; e < contour.length; e++) { var a = contour[e], b = contour[(e + 1) % contour.length];
+      mesh.quadP([a[0], a[1], 0], [b[0], b[1], 0], [b[0], b[1], thk], [a[0], a[1], thk]); }
+    for (var s = 0; s < holes.length; s++) { var loop = holes[s];
+      for (var k2 = 0; k2 < loop.length; k2++) { var c = loop[k2], d2 = loop[(k2 + 1) % loop.length];
+        mesh.quadP([c[0], c[1], 0], [c[0], c[1], thk], [d2[0], d2[1], thk], [d2[0], d2[1], 0]); } }
+    mesh.endBody();
+  }
+
+  // Sweep a closed (y,z) profile along x from x0 to x1 into a watertight prism.
+  // Reuse the proven extrudeContour (profile as an XY contour extruded x0..x1),
+  // then cyclically permute coords (X,Y,Z)->(Z,X,Y). A cyclic permutation is a
+  // rotation (determinant +1), so winding and positive volume are preserved.
+  function sweepProfileX(mesh, profile, x0, x1) {
+    var tmp = new Mesh();
+    extrudeContour(tmp, profile, x0, x1);   // verts are (py, pz, xval)
+    var b0 = mesh.verts.length / 3, V = tmp.verts, T = tmp.tris;
+    for (var i = 0; i < V.length; i += 3) mesh.verts.push(V[i+2], V[i], V[i+1]); // -> (xval, py, pz)
+    for (var t = 0; t < T.length; t += 3) mesh.tris.push(b0 + T[t], b0 + T[t+1], b0 + T[t+2]);
+  }
+
+  // DIN-rail cradle on the bottom: two inward-hooking lips 35mm apart (TS35).
+  // Clips on by a slight flex; a fixed cradle, not a sprung clip.
+  function buildDinCradle(mesh, W, D, along, len) {
+    var span = 35, gap = span / 2, lipT = 2.2, hook = 1.6, drop = 6.5, hookH = 2.2;
+    len = Math.min(len || Math.min(W, D) * 0.6, D - 8);
+    var x0 = along - len / 2, x1 = along + len / 2;
+    // profile in (y, z), z=0 at box bottom growing downward (negative z)
+    // left lip hooks in +y, right lip hooks in -y
+    function lip(sign) {
+      var yOuter = sign * (gap + lipT), yInner = sign * gap, yHook = sign * (gap - hook);
+      return [
+        [yOuter, 0], [yOuter, -drop], [yHook, -drop], [yHook, -drop + hookH],
+        [yInner, -drop + hookH], [yInner, 0]
+      ];
+    }
+    mesh.beginBody("din");
+    sweepProfileX(mesh, ensurePolyCCWYZ(lip(1)), x0, x1);
+    sweepProfileX(mesh, ensurePolyCCWYZ(lip(-1)), x0, x1);
+    // a thin web joining the two lips at the box bottom so they print as one body
+    var webT = 1.6;
+    sweepProfileX(mesh, [[-(gap + 0.1), 0], [-(gap + 0.1), -webT], [gap + 0.1, -webT], [gap + 0.1, 0]], x0, x1);
+    mesh.endBody();
+  }
+  // ensure a (y,z) profile is CCW in the y-z plane for outward sweep normals
+  function ensurePolyCCWYZ(p) {
+    var area = 0; for (var i = 0; i < p.length; i++) { var a = p[i], b = p[(i + 1) % p.length]; area += a[0] * b[1] - b[0] * a[1]; }
+    return area < 0 ? p.slice().reverse() : p;
+  }
+  // copy a temp mesh's triangles into dst as a fresh (non-welded) body, so an
+  // overlapping add-on never welds to the shell and flips shared edges.
+  // opt.swapXY reflects x<->y (used to re-aim an x-swept body along y) and
+  // reverses winding to keep normals outward.
+  function appendRaw(dst, src, name, opt) {
+    var b0 = dst.verts.length / 3, V = src.verts, T = src.tris, swap = opt && opt.swapXY;
+    dst.beginBody(name);
+    for (var i = 0; i < V.length; i += 3) {
+      if (swap) dst.verts.push(V[i+1], V[i], V[i+2]); else dst.verts.push(V[i], V[i+1], V[i+2]);
+    }
+    for (var t = 0; t < T.length; t += 3) {
+      if (swap) dst.tris.push(b0 + T[t], b0 + T[t+2], b0 + T[t+1]);
+      else dst.tris.push(b0 + T[t], b0 + T[t+1], b0 + T[t+2]);
+    }
+    dst.endBody();
+  }
+
   /* ================================================================ LID
      Built in its own coordinate frame, print-ready (flat, top up at z=lidThk).
      Snap/friction tongue OR screw-down corner holes; optional window + text. */
@@ -1152,6 +1309,38 @@
       ],
       note: "Same holes as Pi 4 but USB/Ethernet swapped sides: Pi 4 and Pi 5 lids are NOT interchangeable. Active-cooler fan header common."
     },
+    esp32_devkit: {
+      name: "ESP32 DevKit (30-pin)", W: 52, D: 28.3, pcb: 1.6, holeDia: 3.2, standoff: 5, headerStack: 9,
+      holes: [ { x: -23, y: -11.5, screw: 2.5 }, { x: 23, y: -11.5, screw: 2.5 }, { x: -23, y: 11.5, screw: 2.5 }, { x: 23, y: 11.5, screw: 2.5 } ],
+      connectors: [ { label: "USB", side: "left", off: 0, z: 2.0, w: 8.5, h: 3.2, on: true } ],
+      note: "NOMINAL: 30-pin DOIT-style footprint. Wide 38-pin and other clones vary; verify against your board."
+    },
+    pi_zero2: {
+      name: "Raspberry Pi Zero 2 W", W: 65, D: 30, pcb: 1.6, holeDia: 2.75, standoff: 3, headerStack: 8.5,
+      holes: [ { x: -29, y: -11.5, screw: 2.5 }, { x: 29, y: -11.5, screw: 2.5 }, { x: -29, y: 11.5, screw: 2.5 }, { x: 29, y: 11.5, screw: 2.5 } ],
+      connectors: [
+        { label: "mini-HDMI", side: "front", off: -12, z: 1.6, w: 7.5, h: 3.5, on: true },
+        { label: "USB data", side: "front", off: 4, z: 1.6, w: 8, h: 3, on: true },
+        { label: "USB power", side: "front", off: 16, z: 1.6, w: 8, h: 3, on: true },
+        { label: "microSD", side: "left", off: 0, z: -1.0, w: 12, h: 2.5, on: true }
+      ],
+      note: "NOMINAL: 58x23 mm hole pattern. Verify port positions against your board."
+    },
+    feather: {
+      name: "Adafruit Feather", W: 50.8, D: 22.9, pcb: 1.6, holeDia: 2.5, standoff: 5, headerStack: 9,
+      holes: [ { x: -22.5, y: -8.9, screw: 2.5 }, { x: 22.5, y: -8.9, screw: 2.5 }, { x: -22.5, y: 8.9, screw: 2.5 }, { x: 22.5, y: 8.9, screw: 2.5 } ],
+      connectors: [
+        { label: "USB", side: "left", off: 0, z: 2.0, w: 9, h: 3.4, on: true },
+        { label: "LiPo JST", side: "right", off: 6, z: 2.0, w: 6, h: 4, on: false }
+      ],
+      note: "NOMINAL: standard Feather outline. USB type varies by board (micro vs USB-C); verify."
+    },
+    nano: {
+      name: "Arduino Nano", W: 45, D: 18, pcb: 1.6, standoff: 4, headerStack: 9,
+      holes: [],
+      connectors: [ { label: "USB", side: "left", off: 0, z: 2.0, w: 8, h: 3.2, on: true } ],
+      note: "NOMINAL: most Nanos have no mounting holes (breadboard part). USB type varies; verify."
+    },
     generic: {
       name: "Generic project box", W: 80, D: 60, pcb: 1.6, standoff: 5, headerStack: 0,
       holes: [ { x: -30, y: -22, screw: 3 }, { x: 30, y: -22, screw: 3 }, { x: -30, y: 22, screw: 3 }, { x: 30, y: 22, screw: 3 } ],
@@ -1181,10 +1370,11 @@
     var standoff = cfg.standoff != null ? cfg.standoff : board.standoff;
 
     // interior from board + clearance; interior height from stack
+    var pcb = cfg.customPcb || board.pcb;
     var bx = (cfg.customW || board.W), by = (cfg.customD || board.D);
     var interiorW = bx + 2 * clearance + 2 * (cfg.sideGap || 1.5);
     var interiorD = by + 2 * clearance + 2 * (cfg.sideGap || 1.5);
-    var stack = standoff + board.pcb + (cfg.headerStack != null ? cfg.headerStack : board.headerStack) + (cfg.extraStack || 0);
+    var stack = standoff + pcb + (cfg.headerStack != null ? cfg.headerStack : board.headerStack) + (cfg.extraStack || 0);
     // interior must also clear the tallest side connector: a cutout needs its top
     // (pcbTop + conn.z + conn.h/2) to sit below the rim with room for the margin,
     // or the port would be dropped as "does not fit". Fold that into the height.
@@ -1192,7 +1382,7 @@
     var tallestTop = 0;
     for (var ci = 0; ci < connsForH.length; ci++) { var cc = connsForH[ci];
       if (cc.on === false) continue;
-      var top = standoff + board.pcb + (cc.z || 0) + (cc.h || 0) / 2 + 2.0; // 2mm = margin + a little air
+      var top = standoff + pcb + (cc.z || 0) + (cc.h || 0) / 2 + 2.0; // 2mm = margin + a little air
       if (top > tallestTop) tallestTop = top;
     }
     var interiorH = Math.max(cfg.minHeight || 0, stack + (cfg.headroom || 3), tallestTop);
@@ -1201,7 +1391,7 @@
     var zCav = floor;
 
     // z base for connector centres = cavity floor + standoff + pcb (PCB top)
-    var pcbTop = zCav + standoff + board.pcb;
+    var pcbTop = zCav + standoff + pcb;
 
     // wall features from connectors
     var runs = straightRuns(W, D, Math.max(cfg.corner || 3, wall + 0.8));
@@ -1259,16 +1449,23 @@
     var footRecesses = [];
     if (cfg.feet !== false) {
       var fr = cfg.footR || 5, fin = Math.max(fr + 2, wall + fr + 1);
-      [[W/2-fin,D/2-fin],[-(W/2-fin),D/2-fin],[W/2-fin,-(D/2-fin)],[-(W/2-fin),-(D/2-fin)]].forEach(function (p) {
-        footRecesses.push({ x: p[0], y: p[1], r: fr, depth: cfg.footDepth || 1.5 });
-      });
+      var cxF = W / 2 - fin, cyF = D / 2 - fin;
+      // shrink the feet so neighbours never overlap (2*center must exceed 2*r + slack)
+      var maxR = Math.min(cxF, cyF) - 0.6;
+      if (maxR < fr) fr = maxR;
+      if (fr < 2) { warn.push("Feet skipped: the base is too small to fit non-overlapping foot recesses."); }
+      else {
+        [[cxF, cyF], [-cxF, cyF], [cxF, -cyF], [-cxF, -cyF]].forEach(function (p) {
+          footRecesses.push({ x: p[0], y: p[1], r: fr, depth: cfg.footDepth || 1.5 });
+        });
+      }
     }
 
     // --- build base ---
     var base = new Mesh(); base.warn = warn;
     var geo = buildShell(base, { W: W, D: D, wall: wall, floor: floor, height: height,
       r: cfg.corner || 3, arc: cfg.arc || 10, chamfer: cfg.chamfer != null ? cfg.chamfer : 0.8,
-      wallFeatures: wallFeatures, footRecesses: footRecesses, warn: warn });
+      wallFeatures: wallFeatures, footRecesses: footRecesses, gasket: cfg.gasket, warn: warn });
 
     // bosses on real hole coordinates
     var holes = (cfg.customHoles || board.holes || []);
@@ -1304,6 +1501,27 @@
       base.endBody();
     }
 
+    // case mounting: flange tabs (plain hole or keyhole) on two opposite walls.
+    // Each tab is built in its own mesh and appended raw so it never welds to
+    // the shell (a weld there would flip the shared edges).
+    if (cfg.mountTabs && cfg.mountTabs.sides) {
+      var mt = cfg.mountTabs, mThk = Math.max(mt.thk || Math.max(floor, 3), 2.4);
+      var mScrew = mt.screw || 4, mKind = mt.hole || "plain";
+      var tabW = Math.max(mt.tabW || (mScrew * 3 + 6), mScrew * 2 + 6);
+      var tabLen = Math.max(mt.tabLen || (mScrew * 3 + 8), mScrew * 2 + 8);
+      var pair = mt.sides === "fb" ? ["front", "back"] : ["left", "right"];
+      for (var pt = 0; pt < 2; pt++) {
+        var tmt = new Mesh(); buildMountTab(tmt, pair[pt], W, D, 0, tabW, tabLen, mThk, 2, mKind, mScrew);
+        appendRaw(base, tmt, "mount");
+      }
+    }
+    // DIN-rail cradle on the bottom, running along the long axis.
+    if (cfg.din) {
+      var tdin = new Mesh();
+      if (W >= D) { buildDinCradle(tdin, W, D, 0, cfg.din.len || W * 0.6); appendRaw(base, tdin, "din"); }
+      else { buildDinCradle(tdin, D, W, 0, cfg.din.len || D * 0.6); appendRaw(base, tdin, "din", { swapXY: true }); }
+    }
+
     // --- lid ---
     var lid = buildLid({ W: W, D: D, wall: wall, lidThk: lidThk, nozzle: nozzle,
       lidAttach: cfg.lidAttach || "snap", lipH: cfg.lipH || 4, lidScrew: cfg.lidScrew || 3,
@@ -1316,7 +1534,7 @@
     // --- ghost board (preview only) ---
     var ghost = new Mesh();
     ghost.beginBody("ghost");
-    var gz0 = zCav + standoff, gz1 = gz0 + board.pcb;
+    var gz0 = zCav + standoff, gz1 = gz0 + pcb;
     extrudeContour(ghost, rectPts(0, 0, bx, by), gz0, gz1);
     ghost.endBody();
 

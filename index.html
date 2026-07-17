@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- SCABBARD :: index.html :: v1.1.0 -->
+<!-- SCABBARD :: index.html :: v1.2.0 -->
 <html lang="en" data-theme="night">
 <head>
 <meta charset="utf-8">
@@ -112,6 +112,7 @@ main { flex:1 1 auto; display:grid; grid-template-columns:minmax(280px,340px) 1f
 .connlist { display:grid; gap:7px; }
 .connlist .inline { justify-content:space-between; }
 .connlist .meta { font-family:var(--mono); font-size:0.68rem; color:var(--muted); }
+button.mini { min-height:0; padding:3px 8px; font-size:0.68rem; font-family:var(--mono); }
 
 /* ---- warnings ---- */
 #warnings { padding:0 16px; }
@@ -152,7 +153,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
   <div class="wordmark">SCABBARD<span class="fi"> ::</span></div>
   <div>
     <div class="tagline">board-fitted enclosure generator</div>
-    <div class="ver">FI-111 &middot; <span id="verNum">v1.1.0</span> &middot; GPL-3.0</div>
+    <div class="ver">FI-111 &middot; <span id="verNum">v1.2.0</span> &middot; GPL-3.0</div>
   </div>
   <div class="grow"></div>
   <div class="tools">
@@ -184,6 +185,17 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
             <option value="friction">Friction tongue</option>
             <option value="screw">Screw-down corners</option>
           </select>
+        </div>
+        <div id="customDims" style="display:none">
+          <div class="hint">Measure your own board: enter its size, then add holes and ports under Connectors.</div>
+          <div class="row2">
+            <div class="field"><label for="customW">Board width mm</label><input type="number" id="customW" value="80" step="0.5"></div>
+            <div class="field"><label for="customD">Board depth mm</label><input type="number" id="customD" value="60" step="0.5"></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label for="customPcb">PCB thick mm</label><input type="number" id="customPcb" value="1.6" step="0.1"></div>
+            <div class="field"><label for="customStandoff">Standoff mm</label><input type="number" id="customStandoff" value="5" step="0.5"></div>
+          </div>
         </div>
       </div>
     </details>
@@ -284,10 +296,39 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     </details>
 
     <details class="group">
+      <summary>Case mounting</summary>
+      <div class="body">
+        <div class="inline"><input type="checkbox" id="tabsOn"><label for="tabsOn">Mounting flange tabs</label></div>
+        <div class="row2">
+          <div class="field"><label for="tabSides">Tabs on</label>
+            <select id="tabSides"><option value="lr">Left and right</option><option value="fb">Front and back</option></select></div>
+          <div class="field"><label for="tabHole">Hole</label>
+            <select id="tabHole"><option value="plain">Plain</option><option value="keyhole">Keyhole</option></select></div>
+        </div>
+        <div class="field"><label for="tabScrew">Tab screw dia mm</label><input type="number" id="tabScrew" value="4" step="0.5" min="2"></div>
+        <div class="inline"><input type="checkbox" id="dinOn"><label for="dinOn">DIN-rail cradle (TS35, clip-on)</label></div>
+        <div class="hint">The DIN cradle is a fixed clip that snaps on with a slight flex. Print in PETG or ABS for give, and tune fit with the coupon.</div>
+        <div class="inline"><input type="checkbox" id="gasketOn"><label for="gasketOn">Gasket groove (O-ring channel in the rim)</label></div>
+        <div class="row2">
+          <div class="field"><label for="gasketW">Channel width mm</label><input type="number" id="gasketW" value="1.6" step="0.1"></div>
+          <div class="field"><label for="gasketD">Channel depth mm</label><input type="number" id="gasketD" value="1.5" step="0.1"></div>
+        </div>
+        <div class="hint">Needs a thicker wall to leave solid lips either side of the channel. Skipped with a warning if the wall is too thin.</div>
+      </div>
+    </details>
+
+    <details class="group">
       <summary>Connectors</summary>
       <div class="body">
         <div class="hint">Toggle which ports get a wall cutout. Dimensions are typical starting points, verify against the mechanical drawing before a real print.</div>
         <div class="connlist" id="connlist"></div>
+        <div id="customConnWrap" style="display:none">
+          <div class="hint" style="margin-top:8px">Custom board: add your own ports and mounting holes. Saved with the project.</div>
+          <div class="connlist" id="customConnList"></div>
+          <button id="addConn" class="full">Add a port cutout</button>
+          <div class="connlist" id="customHoleList"></div>
+          <button id="addHole" class="full">Add a mounting hole</button>
+        </div>
       </div>
     </details>
 
@@ -326,11 +367,12 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
     <button class="close" id="aboutClose" aria-label="Close">Close</button>
     <h2 id="aboutTitle">SCABBARD</h2>
-    <p><b>Field Instrument FI-111</b>, version <span id="aboutVer">1.1.0</span>. A sheath fitted to a blade:
+    <p><b>Field Instrument FI-111</b>, version <span id="aboutVer">1.2.0</span>. A sheath fitted to a blade:
        give it a board and it generates a printable enclosure sized to that board, with mounting bosses,
        connector cutouts, a choice of lid, and text.</p>
     <p>Everything runs on your machine, straight from disk. No server, no account, no upload. Geometry, STL
-       and 3MF export, the ZIP writer, and the preview are all hand-rolled in one file.</p>
+       and 3MF export, the ZIP writer, mounting hardware, gasket channel, and the preview are all hand-rolled
+       in one file.</p>
     <h3 style="color:var(--ink);margin-top:14px">License</h3>
     <p>GPL-3.0. You are free to use, study, change, and share it.</p>
     <h3 style="color:var(--ink);margin-top:14px">Credits</h3>
@@ -842,8 +884,19 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     }
     buildCornerStrips(mesh, W, D, r, ri, arc, zc, zCav, zTop);
 
-    // --- top rim annulus (faces up) between outer and inner at zTop ---
-    fillPolygon(mesh, outerR, [ensureCW(innerR)], function (x, y) { return [x, y, zTop]; }, false);
+    // --- top rim: flat annulus, or an O-ring groove when a gasket is requested ---
+    if (S.gasket && S.gasket.on) {
+      var gw = Math.min(S.gasket.width || 1.6, wall * 0.6);
+      var gd = Math.min(S.gasket.depth || 1.5, (zTop - zCav) * 0.5, wall);
+      if (gw >= 0.8 && (wall - gw) / 2 >= 0.5) {
+        buildGroovedRim(mesh, W, D, r, arc, wall, zTop, gw, gd);
+      } else {
+        if (S.warn) S.warn.push("Gasket groove skipped: the wall is too thin for a channel with solid lips. Thicken the wall.");
+        fillPolygon(mesh, outerR, [ensureCW(innerR)], function (x, y) { return [x, y, zTop]; }, false);
+      }
+    } else {
+      fillPolygon(mesh, outerR, [ensureCW(innerR)], function (x, y) { return [x, y, zTop]; }, false);
+    }
 
     // --- cavity floor (inner footprint at zCav, faces up) ---
     fillPolygon(mesh, inner, null, function (x, y) { return [x, y, zCav]; }, false);
@@ -852,6 +905,21 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
 
     mesh.endBody();
     return { r: r, ri: ri, arc: arc, cham: cham, zCav: zCav, zTop: zTop };
+  }
+
+  // Grooved rim: replace the flat top annulus with an O-ring channel. Five
+  // concentric bands (outer land, outer wall, groove floor, inner wall, inner
+  // land), all rounded rects of equal vertex count so the rings stitch cleanly.
+  function buildGroovedRim(mesh, W, D, r, arc, wall, zTop, gw, gd) {
+    function ring(d) { return roundedRectPts(W - 2 * d, D - 2 * d, Math.max(0.3, r - d), arc); }
+    var outerR = ring(0), gOt = ring(wall / 2 - gw / 2), gIt = ring(wall / 2 + gw / 2), innerR = ring(wall);
+    var zf = zTop - gd;
+    function fz(z) { return function (x, y) { return [x, y, z]; }; }
+    fillPolygon(mesh, outerR, [ensureCW(gOt)], fz(zTop), false);   // outer land (up)
+    stitchRings(mesh, gOt, zTop, gOt, zf, true);                   // outer groove wall
+    fillPolygon(mesh, gOt, [ensureCW(gIt)], fz(zf), false);        // groove floor (up)
+    stitchRings(mesh, gIt, zf, gIt, zTop, true);                   // inner groove wall
+    fillPolygon(mesh, gIt, [ensureCW(innerR)], fz(zTop), false);   // inner land (up)
   }
 
   // stitch two rings (same length) into a skirt band; ptsA at zA, ptsB at zB
@@ -1290,6 +1358,137 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     return { bossR: bossR, boreR: boreR, z1: z1 };
   }
 
+  /* ======================================================= CASE MOUNTING
+     Additive bodies fused to the base: mounting-flange tabs (plain hole or
+     keyhole) and a printed DIN-rail cradle. All by construction, no CSG. */
+
+  // Keyhole outline as one CCW loop: a head circle (radius R) with a slot of
+  // width sw running length L in unit direction (dx,dy), ending in a semicircle.
+  function keyholeContour(cx, cy, R, sw, L, dx, dy) {
+    var hw = sw / 2, px = -dy, py = dx;                 // perpendicular unit
+    var t = Math.sqrt(Math.max(0, R * R - hw * hw));    // where slot sides meet the head circle
+    var aP = Math.atan2(py * hw + dy * t, px * hw + dx * t);   // angle of P+ on circle
+    var aM = Math.atan2(-py * hw + dy * t, -px * hw + dx * t); // angle of P- on circle
+    var pts = [];
+    // major arc of the head, from P- around the back (through -d) to P+
+    var back = Math.atan2(-dy, -dx);
+    var seg = 26;
+    // walk from aM to aP the long way (passing through 'back')
+    function norm(a) { while (a < 0) a += Math.PI * 2; return a; }
+    var start = norm(aM), end = norm(aP), bb = norm(back);
+    if (!(start < bb && bb < end)) { if (end < start) end += Math.PI * 2; }
+    if (end < start) end += Math.PI * 2;
+    for (var i = 0; i <= seg; i++) { var a = start + (end - start) * i / seg;
+      pts.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]); }
+    // down the +perp slot side to the end centre, then semicircle, then back up
+    var ecx = cx + dx * L, ecy = cy + dy * L;
+    var qPx = ecx + px * hw, qPy = ecy + py * hw;       // Q+
+    var qMx = ecx - px * hw, qMy = ecy - py * hw;       // Q-
+    pts.push([qPx, qPy]);
+    var a0 = Math.atan2(qPy - ecy, qPx - ecx), a1 = Math.atan2(qMy - ecy, qMx - ecx);
+    if (a1 < a0) a1 += Math.PI * 2;
+    for (var k = 1; k < 12; k++) { var aa = a0 + (a1 - a0) * k / 12;
+      pts.push([ecx + hw * Math.cos(aa), ecy + hw * Math.sin(aa)]); }
+    pts.push([qMx, qMy]);
+    return ensureCCW(pts);
+  }
+
+  // One flange tab on a wall, extending outward, with a plain or keyhole hole.
+  function buildMountTab(mesh, side, W, D, along, tabW, tabLen, thk, overlap, holeKind, screw) {
+    var out = { front: [0, -1], back: [0, 1], left: [-1, 0], right: [1, 0] }[side];
+    var horiz = (side === "left" || side === "right");
+    var faceX = W / 2, faceY = D / 2;
+    // tab centre: start at the wall face, go outward by tabLen/2 minus the overlap
+    var innerX, innerY;
+    if (side === "left")  { innerX = -faceX; innerY = along; }
+    else if (side === "right") { innerX = faceX; innerY = along; }
+    else if (side === "front") { innerX = along; innerY = -faceY; }
+    else { innerX = along; innerY = faceY; }
+    var cx = innerX + out[0] * (tabLen / 2 - overlap / 2);
+    var cy = innerY + out[1] * (tabLen / 2 - overlap / 2);
+    var longLen = tabLen + overlap;                 // along the outward axis
+    var boxW = horiz ? longLen : tabW;              // x-extent
+    var boxD = horiz ? tabW : longLen;              // y-extent
+    var contour = roundedRectPts(boxW, boxD, Math.min(3, tabW / 2 - 0.5), 6);
+    for (var i = 0; i < contour.length; i++) { contour[i][0] += cx; contour[i][1] += cy; }
+    // hole centre: out toward the free end
+    var hcx = cx + out[0] * (tabLen * 0.18), hcy = cy + out[1] * (tabLen * 0.18);
+    var holes = [];
+    if (holeKind === "keyhole") {
+      var R = screw * 1.15 + 1.2; // head clearance radius
+      // slot points inward (toward the wall / box), so you hang then slide out
+      holes.push(keyholeContour(hcx, hcy, R, screw + 0.6, tabLen * 0.4, -out[0], -out[1]));
+    } else {
+      holes.push(circlePts(hcx, hcy, (screw + 0.6) / 2, 24));
+    }
+    mesh.beginBody("mount");
+    fillPolygon(mesh, contour, holes, function (x, y) { return [x, y, thk]; }, false); // top
+    fillPolygon(mesh, contour, holes, function (x, y) { return [x, y, 0]; }, true);     // bottom
+    for (var e = 0; e < contour.length; e++) { var a = contour[e], b = contour[(e + 1) % contour.length];
+      mesh.quadP([a[0], a[1], 0], [b[0], b[1], 0], [b[0], b[1], thk], [a[0], a[1], thk]); }
+    for (var s = 0; s < holes.length; s++) { var loop = holes[s];
+      for (var k2 = 0; k2 < loop.length; k2++) { var c = loop[k2], d2 = loop[(k2 + 1) % loop.length];
+        mesh.quadP([c[0], c[1], 0], [c[0], c[1], thk], [d2[0], d2[1], thk], [d2[0], d2[1], 0]); } }
+    mesh.endBody();
+  }
+
+  // Sweep a closed (y,z) profile along x from x0 to x1 into a watertight prism.
+  // Reuse the proven extrudeContour (profile as an XY contour extruded x0..x1),
+  // then cyclically permute coords (X,Y,Z)->(Z,X,Y). A cyclic permutation is a
+  // rotation (determinant +1), so winding and positive volume are preserved.
+  function sweepProfileX(mesh, profile, x0, x1) {
+    var tmp = new Mesh();
+    extrudeContour(tmp, profile, x0, x1);   // verts are (py, pz, xval)
+    var b0 = mesh.verts.length / 3, V = tmp.verts, T = tmp.tris;
+    for (var i = 0; i < V.length; i += 3) mesh.verts.push(V[i+2], V[i], V[i+1]); // -> (xval, py, pz)
+    for (var t = 0; t < T.length; t += 3) mesh.tris.push(b0 + T[t], b0 + T[t+1], b0 + T[t+2]);
+  }
+
+  // DIN-rail cradle on the bottom: two inward-hooking lips 35mm apart (TS35).
+  // Clips on by a slight flex; a fixed cradle, not a sprung clip.
+  function buildDinCradle(mesh, W, D, along, len) {
+    var span = 35, gap = span / 2, lipT = 2.2, hook = 1.6, drop = 6.5, hookH = 2.2;
+    len = Math.min(len || Math.min(W, D) * 0.6, D - 8);
+    var x0 = along - len / 2, x1 = along + len / 2;
+    // profile in (y, z), z=0 at box bottom growing downward (negative z)
+    // left lip hooks in +y, right lip hooks in -y
+    function lip(sign) {
+      var yOuter = sign * (gap + lipT), yInner = sign * gap, yHook = sign * (gap - hook);
+      return [
+        [yOuter, 0], [yOuter, -drop], [yHook, -drop], [yHook, -drop + hookH],
+        [yInner, -drop + hookH], [yInner, 0]
+      ];
+    }
+    mesh.beginBody("din");
+    sweepProfileX(mesh, ensurePolyCCWYZ(lip(1)), x0, x1);
+    sweepProfileX(mesh, ensurePolyCCWYZ(lip(-1)), x0, x1);
+    // a thin web joining the two lips at the box bottom so they print as one body
+    var webT = 1.6;
+    sweepProfileX(mesh, [[-(gap + 0.1), 0], [-(gap + 0.1), -webT], [gap + 0.1, -webT], [gap + 0.1, 0]], x0, x1);
+    mesh.endBody();
+  }
+  // ensure a (y,z) profile is CCW in the y-z plane for outward sweep normals
+  function ensurePolyCCWYZ(p) {
+    var area = 0; for (var i = 0; i < p.length; i++) { var a = p[i], b = p[(i + 1) % p.length]; area += a[0] * b[1] - b[0] * a[1]; }
+    return area < 0 ? p.slice().reverse() : p;
+  }
+  // copy a temp mesh's triangles into dst as a fresh (non-welded) body, so an
+  // overlapping add-on never welds to the shell and flips shared edges.
+  // opt.swapXY reflects x<->y (used to re-aim an x-swept body along y) and
+  // reverses winding to keep normals outward.
+  function appendRaw(dst, src, name, opt) {
+    var b0 = dst.verts.length / 3, V = src.verts, T = src.tris, swap = opt && opt.swapXY;
+    dst.beginBody(name);
+    for (var i = 0; i < V.length; i += 3) {
+      if (swap) dst.verts.push(V[i+1], V[i], V[i+2]); else dst.verts.push(V[i], V[i+1], V[i+2]);
+    }
+    for (var t = 0; t < T.length; t += 3) {
+      if (swap) dst.tris.push(b0 + T[t], b0 + T[t+2], b0 + T[t+1]);
+      else dst.tris.push(b0 + T[t], b0 + T[t+1], b0 + T[t+2]);
+    }
+    dst.endBody();
+  }
+
   /* ================================================================ LID
      Built in its own coordinate frame, print-ready (flat, top up at z=lidThk).
      Snap/friction tongue OR screw-down corner holes; optional window + text. */
@@ -1510,6 +1709,38 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
       ],
       note: "Same holes as Pi 4 but USB/Ethernet swapped sides: Pi 4 and Pi 5 lids are NOT interchangeable. Active-cooler fan header common."
     },
+    esp32_devkit: {
+      name: "ESP32 DevKit (30-pin)", W: 52, D: 28.3, pcb: 1.6, holeDia: 3.2, standoff: 5, headerStack: 9,
+      holes: [ { x: -23, y: -11.5, screw: 2.5 }, { x: 23, y: -11.5, screw: 2.5 }, { x: -23, y: 11.5, screw: 2.5 }, { x: 23, y: 11.5, screw: 2.5 } ],
+      connectors: [ { label: "USB", side: "left", off: 0, z: 2.0, w: 8.5, h: 3.2, on: true } ],
+      note: "NOMINAL: 30-pin DOIT-style footprint. Wide 38-pin and other clones vary; verify against your board."
+    },
+    pi_zero2: {
+      name: "Raspberry Pi Zero 2 W", W: 65, D: 30, pcb: 1.6, holeDia: 2.75, standoff: 3, headerStack: 8.5,
+      holes: [ { x: -29, y: -11.5, screw: 2.5 }, { x: 29, y: -11.5, screw: 2.5 }, { x: -29, y: 11.5, screw: 2.5 }, { x: 29, y: 11.5, screw: 2.5 } ],
+      connectors: [
+        { label: "mini-HDMI", side: "front", off: -12, z: 1.6, w: 7.5, h: 3.5, on: true },
+        { label: "USB data", side: "front", off: 4, z: 1.6, w: 8, h: 3, on: true },
+        { label: "USB power", side: "front", off: 16, z: 1.6, w: 8, h: 3, on: true },
+        { label: "microSD", side: "left", off: 0, z: -1.0, w: 12, h: 2.5, on: true }
+      ],
+      note: "NOMINAL: 58x23 mm hole pattern. Verify port positions against your board."
+    },
+    feather: {
+      name: "Adafruit Feather", W: 50.8, D: 22.9, pcb: 1.6, holeDia: 2.5, standoff: 5, headerStack: 9,
+      holes: [ { x: -22.5, y: -8.9, screw: 2.5 }, { x: 22.5, y: -8.9, screw: 2.5 }, { x: -22.5, y: 8.9, screw: 2.5 }, { x: 22.5, y: 8.9, screw: 2.5 } ],
+      connectors: [
+        { label: "USB", side: "left", off: 0, z: 2.0, w: 9, h: 3.4, on: true },
+        { label: "LiPo JST", side: "right", off: 6, z: 2.0, w: 6, h: 4, on: false }
+      ],
+      note: "NOMINAL: standard Feather outline. USB type varies by board (micro vs USB-C); verify."
+    },
+    nano: {
+      name: "Arduino Nano", W: 45, D: 18, pcb: 1.6, standoff: 4, headerStack: 9,
+      holes: [],
+      connectors: [ { label: "USB", side: "left", off: 0, z: 2.0, w: 8, h: 3.2, on: true } ],
+      note: "NOMINAL: most Nanos have no mounting holes (breadboard part). USB type varies; verify."
+    },
     generic: {
       name: "Generic project box", W: 80, D: 60, pcb: 1.6, standoff: 5, headerStack: 0,
       holes: [ { x: -30, y: -22, screw: 3 }, { x: 30, y: -22, screw: 3 }, { x: -30, y: 22, screw: 3 }, { x: 30, y: 22, screw: 3 } ],
@@ -1539,10 +1770,11 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     var standoff = cfg.standoff != null ? cfg.standoff : board.standoff;
 
     // interior from board + clearance; interior height from stack
+    var pcb = cfg.customPcb || board.pcb;
     var bx = (cfg.customW || board.W), by = (cfg.customD || board.D);
     var interiorW = bx + 2 * clearance + 2 * (cfg.sideGap || 1.5);
     var interiorD = by + 2 * clearance + 2 * (cfg.sideGap || 1.5);
-    var stack = standoff + board.pcb + (cfg.headerStack != null ? cfg.headerStack : board.headerStack) + (cfg.extraStack || 0);
+    var stack = standoff + pcb + (cfg.headerStack != null ? cfg.headerStack : board.headerStack) + (cfg.extraStack || 0);
     // interior must also clear the tallest side connector: a cutout needs its top
     // (pcbTop + conn.z + conn.h/2) to sit below the rim with room for the margin,
     // or the port would be dropped as "does not fit". Fold that into the height.
@@ -1550,7 +1782,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     var tallestTop = 0;
     for (var ci = 0; ci < connsForH.length; ci++) { var cc = connsForH[ci];
       if (cc.on === false) continue;
-      var top = standoff + board.pcb + (cc.z || 0) + (cc.h || 0) / 2 + 2.0; // 2mm = margin + a little air
+      var top = standoff + pcb + (cc.z || 0) + (cc.h || 0) / 2 + 2.0; // 2mm = margin + a little air
       if (top > tallestTop) tallestTop = top;
     }
     var interiorH = Math.max(cfg.minHeight || 0, stack + (cfg.headroom || 3), tallestTop);
@@ -1559,7 +1791,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     var zCav = floor;
 
     // z base for connector centres = cavity floor + standoff + pcb (PCB top)
-    var pcbTop = zCav + standoff + board.pcb;
+    var pcbTop = zCav + standoff + pcb;
 
     // wall features from connectors
     var runs = straightRuns(W, D, Math.max(cfg.corner || 3, wall + 0.8));
@@ -1617,16 +1849,23 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     var footRecesses = [];
     if (cfg.feet !== false) {
       var fr = cfg.footR || 5, fin = Math.max(fr + 2, wall + fr + 1);
-      [[W/2-fin,D/2-fin],[-(W/2-fin),D/2-fin],[W/2-fin,-(D/2-fin)],[-(W/2-fin),-(D/2-fin)]].forEach(function (p) {
-        footRecesses.push({ x: p[0], y: p[1], r: fr, depth: cfg.footDepth || 1.5 });
-      });
+      var cxF = W / 2 - fin, cyF = D / 2 - fin;
+      // shrink the feet so neighbours never overlap (2*center must exceed 2*r + slack)
+      var maxR = Math.min(cxF, cyF) - 0.6;
+      if (maxR < fr) fr = maxR;
+      if (fr < 2) { warn.push("Feet skipped: the base is too small to fit non-overlapping foot recesses."); }
+      else {
+        [[cxF, cyF], [-cxF, cyF], [cxF, -cyF], [-cxF, -cyF]].forEach(function (p) {
+          footRecesses.push({ x: p[0], y: p[1], r: fr, depth: cfg.footDepth || 1.5 });
+        });
+      }
     }
 
     // --- build base ---
     var base = new Mesh(); base.warn = warn;
     var geo = buildShell(base, { W: W, D: D, wall: wall, floor: floor, height: height,
       r: cfg.corner || 3, arc: cfg.arc || 10, chamfer: cfg.chamfer != null ? cfg.chamfer : 0.8,
-      wallFeatures: wallFeatures, footRecesses: footRecesses, warn: warn });
+      wallFeatures: wallFeatures, footRecesses: footRecesses, gasket: cfg.gasket, warn: warn });
 
     // bosses on real hole coordinates
     var holes = (cfg.customHoles || board.holes || []);
@@ -1662,6 +1901,27 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
       base.endBody();
     }
 
+    // case mounting: flange tabs (plain hole or keyhole) on two opposite walls.
+    // Each tab is built in its own mesh and appended raw so it never welds to
+    // the shell (a weld there would flip the shared edges).
+    if (cfg.mountTabs && cfg.mountTabs.sides) {
+      var mt = cfg.mountTabs, mThk = Math.max(mt.thk || Math.max(floor, 3), 2.4);
+      var mScrew = mt.screw || 4, mKind = mt.hole || "plain";
+      var tabW = Math.max(mt.tabW || (mScrew * 3 + 6), mScrew * 2 + 6);
+      var tabLen = Math.max(mt.tabLen || (mScrew * 3 + 8), mScrew * 2 + 8);
+      var pair = mt.sides === "fb" ? ["front", "back"] : ["left", "right"];
+      for (var pt = 0; pt < 2; pt++) {
+        var tmt = new Mesh(); buildMountTab(tmt, pair[pt], W, D, 0, tabW, tabLen, mThk, 2, mKind, mScrew);
+        appendRaw(base, tmt, "mount");
+      }
+    }
+    // DIN-rail cradle on the bottom, running along the long axis.
+    if (cfg.din) {
+      var tdin = new Mesh();
+      if (W >= D) { buildDinCradle(tdin, W, D, 0, cfg.din.len || W * 0.6); appendRaw(base, tdin, "din"); }
+      else { buildDinCradle(tdin, D, W, 0, cfg.din.len || D * 0.6); appendRaw(base, tdin, "din", { swapXY: true }); }
+    }
+
     // --- lid ---
     var lid = buildLid({ W: W, D: D, wall: wall, lidThk: lidThk, nozzle: nozzle,
       lidAttach: cfg.lidAttach || "snap", lipH: cfg.lipH || 4, lidScrew: cfg.lidScrew || 3,
@@ -1674,7 +1934,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     // --- ghost board (preview only) ---
     var ghost = new Mesh();
     ghost.beginBody("ghost");
-    var gz0 = zCav + standoff, gz1 = gz0 + board.pcb;
+    var gz0 = zCav + standoff, gz1 = gz0 + pcb;
     extrudeContour(ghost, rectPts(0, 0, bx, by), gz0, gz1);
     ghost.endBody();
 
@@ -1700,7 +1960,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
 (function () {
   "use strict";
   var SCAB = window.SCAB || window; // engine attaches exports flat onto window
-  var VERSION = "1.1.0";
+  var VERSION = "1.2.0";
   var $ = function (id) { return document.getElementById(id); };
   var dbgOn = false;
   function dbg() {
@@ -1739,6 +1999,32 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     });
   }
 
+  /* ---- custom board: user-entered ports and holes (measure your own) ---- */
+  var customConns = [], customHoles = [];
+  function renderCustom() {
+    var isGeneric = boardSel.value === "generic";
+    $("customDims").style.display = isGeneric ? "" : "none";
+    $("customConnWrap").style.display = isGeneric ? "" : "none";
+    var cl = $("customConnList"); cl.innerHTML = "";
+    customConns.forEach(function (c, i) {
+      var row = document.createElement("div"); row.className = "inline";
+      var meta = document.createElement("span"); meta.className = "meta";
+      meta.textContent = c.label + " " + c.side + " " + c.w + "x" + c.h + " @" + c.off;
+      var del = document.createElement("button"); del.textContent = "remove"; del.className = "mini";
+      del.addEventListener("click", function () { customConns.splice(i, 1); renderCustom(); rebuild(); });
+      row.appendChild(meta); row.appendChild(del); cl.appendChild(row);
+    });
+    var hl = $("customHoleList"); hl.innerHTML = "";
+    customHoles.forEach(function (h, i) {
+      var row = document.createElement("div"); row.className = "inline";
+      var meta = document.createElement("span"); meta.className = "meta";
+      meta.textContent = "hole (" + h.x + ", " + h.y + ") M" + h.screw;
+      var del = document.createElement("button"); del.textContent = "remove"; del.className = "mini";
+      del.addEventListener("click", function () { customHoles.splice(i, 1); renderCustom(); rebuild(); });
+      row.appendChild(meta); row.appendChild(del); hl.appendChild(row);
+    });
+  }
+
   /* ---- gather cfg from controls ---- */
   function num(id, d) { var v = parseFloat($(id).value); return isFinite(v) ? v : d; }
   function buildCfg() {
@@ -1763,8 +2049,20 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     if ($("fanOn").checked) cfg.fan = { side: $("fanSide").value, size: parseInt($("fanSize").value, 10) };
     if ($("lidFanOn").checked) cfg.lidFan = { size: parseInt($("lidFanSize").value, 10) };
     if ($("exitOn").checked) cfg.exitSlot = { side: $("exitSide").value, off: num("exitOff", 0), w: 22, h: 6 };
-    // connector on/off overrides
-    if (b.connectors && b.connectors.length) {
+    // case mounting
+    if ($("tabsOn").checked) cfg.mountTabs = { sides: $("tabSides").value, hole: $("tabHole").value, screw: num("tabScrew", 4) };
+    if ($("dinOn").checked) cfg.din = {};
+    if ($("gasketOn").checked) cfg.gasket = { on: true, width: num("gasketW", 1.6), depth: num("gasketD", 1.5) };
+    // custom "measure your own" board
+    if (boardSel.value === "generic") {
+      cfg.customW = num("customW", 80); cfg.customD = num("customD", 60);
+      cfg.customPcb = num("customPcb", 1.6); cfg.standoff = num("customStandoff", 5);
+      if (customHoles.length) cfg.customHoles = customHoles.map(function (h) { return { x: h.x, y: h.y, screw: h.screw }; });
+      if (customConns.length) cfg.connectors = customConns.map(function (c) {
+        return { label: c.label, side: c.side, off: c.off, z: c.z, w: c.w, h: c.h, shape: c.shape, on: true }; });
+    }
+    // connector on/off overrides (named-board ports)
+    if (b.connectors && b.connectors.length && boardSel.value !== "generic") {
       cfg.connectors = b.connectors.map(function (c, i) {
         var key = boardSel.value + "|" + c.label + i;
         var copy = {}; for (var k in c) copy[k] = c[k];
@@ -1997,7 +2295,21 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     $("fanOn").checked = !!c.fan; if (c.fan) { $("fanSide").value = c.fan.side || "back"; $("fanSize").value = String(c.fan.size || 40); }
     $("lidFanOn").checked = !!c.lidFan; if (c.lidFan) $("lidFanSize").value = String(c.lidFan.size || 40);
     $("exitOn").checked = !!c.exitSlot; if (c.exitSlot) { $("exitSide").value = c.exitSlot.side || "back"; setNum("exitOff", c.exitSlot.off, 0); }
-    if (c.connectors) c.connectors.forEach(function (cc, i) { connOn[c.board + "|" + cc.label + i] = cc.on !== false; });
+    $("tabsOn").checked = !!c.mountTabs;
+    if (c.mountTabs) { $("tabSides").value = c.mountTabs.sides || "lr"; $("tabHole").value = c.mountTabs.hole || "plain"; setNum("tabScrew", c.mountTabs.screw, 4); }
+    $("dinOn").checked = !!c.din;
+    $("gasketOn").checked = !!(c.gasket && c.gasket.on);
+    if (c.gasket) { setNum("gasketW", c.gasket.width, 1.6); setNum("gasketD", c.gasket.depth, 1.5); }
+    customConns = []; customHoles = [];
+    if (c.board === "generic") {
+      setNum("customW", c.customW, 80); setNum("customD", c.customD, 60);
+      setNum("customPcb", c.customPcb, 1.6); setNum("customStandoff", c.standoff, 5);
+      if (c.customHoles) customHoles = c.customHoles.map(function (h) { return { x: h.x, y: h.y, screw: h.screw || 3 }; });
+      if (c.connectors) customConns = c.connectors.map(function (cc) {
+        return { label: cc.label, side: cc.side, w: cc.w, h: cc.h, off: cc.off || 0, z: cc.z || 3, shape: cc.shape || "rect" }; });
+    }
+    renderCustom();
+    if (c.connectors && c.board !== "generic") c.connectors.forEach(function (cc, i) { connOn[c.board + "|" + cc.label + i] = cc.on !== false; });
     refreshConnList(); syncRangeLabels(); rebuild();
   }
   function setNum(id, v, d) { $(id).value = (v === undefined || v === null) ? d : v; }
@@ -2076,6 +2388,24 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     try { var buf = STL.meshTo3MF([{ name: "base", mesh: model.base }, { name: "lid", mesh: model.lid, dx: model.meta.W + 10 }]);
       line(buf && buf.length > 100 && buf[0] === 0x50 && buf[1] === 0x4b, "3MF export writes a valid container");
     } catch (e) { line(false, "3MF export threw: " + e.message); }
+    // mounting tabs (plain + keyhole) and DIN cradle keep the base watertight
+    [["plain","lr"],["keyhole","fb"]].forEach(function (p) {
+      try { var Mt = SCAB.SCAB_MODEL.buildModel({ board: "pi5", mountTabs: { sides: p[1], hole: p[0], screw: 4 } });
+        var ct = check(Mt.base); line(ct.closed && ct.consistent && bodies(Mt.base, "mnt"), "mount tabs " + p[0] + " keep the base watertight");
+      } catch (e) { line(false, "mount tabs " + p[0] + " threw: " + e.message); }
+    });
+    try { var Md = SCAB.SCAB_MODEL.buildModel({ board: "pi5", din: {} });
+      var cd = check(Md.base); line(cd.closed && cd.consistent && bodies(Md.base, "din"), "DIN cradle keeps the base watertight");
+    } catch (e) { line(false, "DIN cradle threw: " + e.message); }
+    // gasket groove keeps the shell watertight
+    try { var Mg = SCAB.SCAB_MODEL.buildModel({ board: "generic", wall: 3, gasket: { on: true } });
+      var cg = check(Mg.base); line(cg.closed && cg.manifold && cg.consistent, "gasket groove keeps the shell watertight");
+    } catch (e) { line(false, "gasket groove threw: " + e.message); }
+    // custom board sizes and builds
+    try { var Mc = SCAB.SCAB_MODEL.buildModel({ board: "generic", customW: 70, customD: 40,
+        customHoles: [{ x: -30, y: -15, screw: 3 }], connectors: [{ label: "USB", side: "front", off: 0, z: 3, w: 9, h: 3.5, on: true }] });
+      var cc2 = check(Mc.base); line(cc2.closed && cc2.consistent && bodies(Mc.base, "cust"), "custom board builds watertight");
+    } catch (e) { line(false, "custom board threw: " + e.message); }
     $("testSummary").innerHTML = fails === 0
       ? '<span style="color:var(--ok)">All ' + total + " checks pass. Geometry is watertight across every board.</span>"
       : '<span style="color:var(--danger)">' + fails + " of " + total + " checks failed.</span>";
@@ -2085,18 +2415,38 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
   var inputs = ["lidAttach","headroom","extraStack","clearance","wall","floor","lidThk","nozzle","corner","chamfer",
     "feet","textStr","textMode","textSize","textDepth","wallTextStr","wallTextSide","wallTextSize","wallTextHeight","wallTextOff",
     "ventsOn","ventSide","ventCount","fanOn","fanSide","fanSize","lidFanOn","lidFanSize",
-    "exitOn","exitSide","exitOff"];
+    "exitOn","exitSide","exitOff","tabsOn","tabSides","tabHole","tabScrew","dinOn","gasketOn","gasketW","gasketD",
+    "customW","customD","customPcb","customStandoff"];
   inputs.forEach(function (id) {
     var el = $(id), ev = (el.type === "range" || el.type === "text" || el.type === "number") ? "input" : "change";
     el.addEventListener(ev, function () { syncRangeLabels(); scheduleRebuild(); });
   });
-  boardSel.addEventListener("change", function () { refreshConnList(); rebuild(); });
+  boardSel.addEventListener("change", function () { refreshConnList(); renderCustom(); rebuild(); });
+  // add-port / add-hole for a custom board (prompt-based, no library)
+  function ask(msg, def) { var v = window.prompt(msg, def); return v == null ? null : v.trim(); }
+  $("addConn").addEventListener("click", function () {
+    var label = ask("Port label (e.g. USB-C):", "Port"); if (label == null) return;
+    var side = (ask("Wall (front/back/left/right):", "front") || "front").toLowerCase();
+    if (["front","back","left","right"].indexOf(side) < 0) side = "front";
+    var w = parseFloat(ask("Width mm:", "9")) || 9, h = parseFloat(ask("Height mm:", "3.5")) || 3.5;
+    var off = parseFloat(ask("Offset along wall mm (0 = centre):", "0")) || 0;
+    var z = parseFloat(ask("Height above PCB to centre mm:", "3")) || 3;
+    var shape = (ask("Shape (rect/round):", "rect") || "rect").toLowerCase() === "round" ? "round" : "rect";
+    customConns.push({ label: label, side: side, w: w, h: h, off: off, z: z, shape: shape });
+    renderCustom(); rebuild();
+  });
+  $("addHole").addEventListener("click", function () {
+    var x = parseFloat(ask("Hole X from board centre mm:", "0")); if (isNaN(x)) return;
+    var y = parseFloat(ask("Hole Y from board centre mm:", "0")); if (isNaN(y)) return;
+    var screw = parseFloat(ask("Screw dia mm:", "3")) || 3;
+    customHoles.push({ x: x, y: y, screw: screw }); renderCustom(); rebuild();
+  });
   var rbT = null;
   function scheduleRebuild() { clearTimeout(rbT); rbT = setTimeout(rebuild, reduceMotion ? 0 : 90); }
 
   /* ---- boot ---- */
   $("verNum").textContent = "v" + VERSION; $("aboutVer").textContent = VERSION;
-  refreshConnList(); syncRangeLabels();
+  refreshConnList(); renderCustom(); syncRangeLabels();
   window.addEventListener("load", function () { resize(); rebuild(); });
   resize(); rebuild();
 })();

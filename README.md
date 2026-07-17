@@ -30,6 +30,11 @@ export, the isometric preview) is hand-rolled in the one file.
   embossed lid text, an LED window, and a lid-mounted fan (opening plus mounting holes
   at the standard pitch for the fan size).
 - **Wall text**: a raised legend on the outside of any wall.
+- **Case mounting**: flange tabs on two opposite walls with a plain hole or a keyhole
+  (hang it on two screws), and a printed DIN-rail cradle (TS35) that clips on with a
+  slight flex.
+- **Gasket groove**: an optional O-ring channel recessed into the base rim, compressed by
+  the lid. Needs a thicker wall so solid lips remain either side of the channel.
 - **Fit-test coupon**: a small clearance ladder and a self-tap boss so you can dial in
   your printer's real tolerance before committing to the full case.
 
@@ -40,7 +45,12 @@ each is a separate object the slicer can arrange. Save the whole configuration a
 ## Boards
 
 Arduino Uno R4 (Minima / WiFi), Arduino Uno Q, the Arduino MKR line, Raspberry Pi 4,
-Raspberry Pi 5, and a fully parametric generic project box.
+Raspberry Pi 5, ESP32 DevKit (30-pin), Raspberry Pi Zero 2 W, Adafruit Feather, Arduino
+Nano, and a fully parametric generic project box.
+
+**Measure your own board.** Pick the generic box, type in your board's width, depth, PCB
+thickness, and standoff, then add your own mounting holes and port cutouts. The whole
+custom board is saved in the `.case` project so you can reuse it.
 
 Board dimensions are typical starting points. Verify against the official mechanical
 drawing before your first real print. The connector panel lets you toggle each port and
@@ -97,6 +107,15 @@ Each release saved as its own file. GPL-3.0.
 - **Fan fit is enforced.** A wall fan that will not fit a short wall, or a lid fan whose
   mounting pattern would fall off the lid, is left off with a warning. Put a big fan on a
   bigger case.
+- **DIN cradle is a fixed clip, not a sprung one.** It grips the rail by a slight flex of
+  the printed hooks, so print it in PETG or ABS for give and tune the fit with the coupon.
+  A true spring latch is future work.
+- **Gasket needs wall to spare.** The O-ring channel is carved from the rim by
+  construction, so it needs solid lips either side. On a thin wall it is skipped with a
+  warning. There is no matching bead on the lid yet; the lid face compresses the O-ring.
+- **Custom board entry is by prompt.** Measure-your-own uses simple prompts for each port
+  and hole. It is functional and saves into the project, but there is no drag-on-canvas
+  placement yet.
 - **Not a slicer.** Wall thickness, bosses, and clearances are print-aware, but supports,
   infill, orientation, and material are your slicer's job.
 - **PWA layer deferred.** Disk-first only. A service worker cannot register from
@@ -107,7 +126,9 @@ Each release saved as its own file. GPL-3.0.
 - `index.html` : the instrument. This is the release.
 - `engine.js` : the geometry engine, embedded into `index.html` at build. Kept separate
   for the Node test harnesses.
-- `test.js`, `test-model.js`, `test-v11.js` : Node assertion harnesses. Run each with
-  `node <file>`. `test-v11.js` covers wall text, the lid fan, and 3MF.
+- `test.js`, `test-model.js`, `test-v11.js`, `test-v12.js` : Node assertion harnesses.
+  Run each with `node <file>`. `test-v11.js` covers wall text, the lid fan, and 3MF;
+  `test-v12.js` covers mounting tabs, the DIN cradle, the gasket groove, custom boards,
+  and the new board library.
 
 Make. Hack. Learn. Share. Repeat.
