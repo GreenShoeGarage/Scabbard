@@ -5,7 +5,7 @@
 (function (root) {
   "use strict";
 
-  var ENGINE_VERSION = "1.2.1";
+  var ENGINE_VERSION = "1.2.2";
 
   /* ---------------------------------------------------------------- vec */
   function v3(x, y, z) { return [x, y, z]; }
@@ -1252,9 +1252,12 @@
     uno_r4: {
       name: "Arduino Uno R4 (Minima / WiFi)", W: 68.6, D: 53.4, pcb: 1.6, holeDia: 3.2, standoff: 6, headerStack: 9,
       holes: UNO_HOLES.map(function (h) { return { x: h.x, y: h.y, screw: 3 }; }),
+      // USB-C (CX90B-16P) and the 2.1mm barrel jack (J4) are both on the same short
+      // edge, USB-C nearer the digital-header corner. Offsets are best-estimate from
+      // the standard Uno layout; positions are editable in the connector panel.
       connectors: [
-        { label: "USB-C", side: "left", off: 16, z: 3.0, w: 9.5, h: 3.6, on: true },
-        { label: "Barrel", side: "left", off: 6, z: 5.5, w: 9.2, h: 11, shape: "round", on: true }
+        { label: "USB-C", side: "left", off: 18, z: 1.8, w: 9.5, h: 3.5, on: true },
+        { label: "Barrel", side: "left", off: 5, z: 5.0, w: 11, h: 11, shape: "round", on: true }
       ],
       matrix: { note: "WiFi variant 12x8 LED matrix, lid window optional" }
     },

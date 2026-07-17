@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- SCABBARD :: index.html :: v1.2.1 -->
+<!-- SCABBARD :: index.html :: v1.2.2 -->
 <html lang="en" data-theme="night">
 <head>
 <meta charset="utf-8">
@@ -114,6 +114,10 @@ main { flex:1 1 auto; display:grid; grid-template-columns:minmax(280px,340px) 1f
 .connlist { display:grid; gap:7px; }
 .connlist .inline { justify-content:space-between; }
 .connlist .meta { font-family:var(--mono); font-size:0.68rem; color:var(--muted); }
+.conncard { border:1px solid var(--line); border-radius:6px; padding:6px 8px; margin-bottom:6px; }
+.conngrid { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:5px; margin-top:6px; }
+.connf { font-family:var(--mono); font-size:0.6rem; color:var(--muted); display:flex; flex-direction:column; gap:2px; }
+.connf input { padding:3px 4px; font-size:0.72rem; }
 button.mini { min-height:0; padding:3px 8px; font-size:0.68rem; font-family:var(--mono); }
 
 /* ---- warnings ---- */
@@ -155,7 +159,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
   <div class="wordmark">SCABBARD<span class="fi"> ::</span></div>
   <div>
     <div class="tagline">board-fitted enclosure generator</div>
-    <div class="ver">FI-111 &middot; <span id="verNum">v1.2.1</span> &middot; GPL-3.0</div>
+    <div class="ver">FI-111 &middot; <span id="verNum">v1.2.2</span> &middot; GPL-3.0</div>
   </div>
   <div class="grow"></div>
   <div class="tools">
@@ -322,7 +326,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     <details class="group">
       <summary>Connectors</summary>
       <div class="body">
-        <div class="hint">Toggle which ports get a wall cutout. Dimensions are typical starting points, verify against the mechanical drawing before a real print.</div>
+        <div class="hint">Toggle a port on or off, and edit its offset along the wall, its height above the PCB, and its cutout size. Values are typical starting points; measure your board and adjust, then save the project. Offset is measured from the centre of the wall.</div>
         <div class="connlist" id="connlist"></div>
         <div id="customConnWrap" style="display:none">
           <div class="hint" style="margin-top:8px">Custom board: add your own ports and mounting holes. Saved with the project.</div>
@@ -372,7 +376,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
     <button class="close" id="aboutClose" aria-label="Close">Close</button>
     <h2 id="aboutTitle">SCABBARD</h2>
-    <p><b>Field Instrument FI-111</b>, version <span id="aboutVer">1.2.1</span>. A sheath fitted to a blade:
+    <p><b>Field Instrument FI-111</b>, version <span id="aboutVer">1.2.2</span>. A sheath fitted to a blade:
        give it a board and it generates a printable enclosure sized to that board, with mounting bosses,
        connector cutouts, a choice of lid, and text.</p>
     <p>Everything runs on your machine, straight from disk. No server, no account, no upload. Geometry, STL
@@ -410,7 +414,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
 (function (root) {
   "use strict";
 
-  var ENGINE_VERSION = "1.2.1";
+  var ENGINE_VERSION = "1.2.2";
 
   /* ---------------------------------------------------------------- vec */
   function v3(x, y, z) { return [x, y, z]; }
@@ -1657,9 +1661,12 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
     uno_r4: {
       name: "Arduino Uno R4 (Minima / WiFi)", W: 68.6, D: 53.4, pcb: 1.6, holeDia: 3.2, standoff: 6, headerStack: 9,
       holes: UNO_HOLES.map(function (h) { return { x: h.x, y: h.y, screw: 3 }; }),
+      // USB-C (CX90B-16P) and the 2.1mm barrel jack (J4) are both on the same short
+      // edge, USB-C nearer the digital-header corner. Offsets are best-estimate from
+      // the standard Uno layout; positions are editable in the connector panel.
       connectors: [
-        { label: "USB-C", side: "left", off: 16, z: 3.0, w: 9.5, h: 3.6, on: true },
-        { label: "Barrel", side: "left", off: 6, z: 5.5, w: 9.2, h: 11, shape: "round", on: true }
+        { label: "USB-C", side: "left", off: 18, z: 1.8, w: 9.5, h: 3.5, on: true },
+        { label: "Barrel", side: "left", off: 5, z: 5.0, w: 11, h: 11, shape: "round", on: true }
       ],
       matrix: { note: "WiFi variant 12x8 LED matrix, lid window optional" }
     },
@@ -1965,7 +1972,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
 (function () {
   "use strict";
   var SCAB = window.SCAB || window; // engine attaches exports flat onto window
-  var VERSION = "1.2.1";
+  var VERSION = "1.2.2";
   var $ = function (id) { return document.getElementById(id); };
   var dbgOn = false;
   function dbg() {
@@ -1983,24 +1990,43 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
   });
   boardSel.value = "uno_r4";
 
-  /* ---- connector toggles rebuilt per board ---- */
-  var connOn = {}; // key "board|label" -> bool
+  /* ---- connector rows rebuilt per board: editable position and size ---- */
+  var connOn = {};    // key -> bool (on/off)
+  var connEdit = {};  // key -> { off, z, w, h } overrides
+  function connKey(i, c) { return boardSel.value + "|" + c.label + i; }
+  function connVals(key, c) {
+    var e = connEdit[key] || {};
+    return { off: e.off != null ? e.off : (c.off || 0), z: e.z != null ? e.z : (c.z || 3),
+      w: e.w != null ? e.w : (c.w || 9), h: e.h != null ? e.h : (c.h || 4) };
+  }
   function refreshConnList() {
     var b = boards[boardSel.value], list = $("connlist"); list.innerHTML = "";
     var conns = b.connectors || [];
-    if (!conns.length) { list.innerHTML = '<div class="hint">No named connectors for this board. Use the generic escape hatch or add cutouts via cooling and access.</div>'; return; }
+    if (!conns.length) { list.innerHTML = '<div class="hint">No named connectors for this board. Use the generic escape hatch or the cooling and access cutouts.</div>'; return; }
     conns.forEach(function (c, i) {
-      var key = boardSel.value + "|" + c.label + i;
+      var key = connKey(i, c);
       if (connOn[key] === undefined) connOn[key] = c.on !== false;
-      var wrap = document.createElement("div"); wrap.className = "inline";
-      var left = document.createElement("div"); left.className = "inline";
+      var v = connVals(key, c);
+      var card = document.createElement("div"); card.className = "conncard";
+      var head = document.createElement("div"); head.className = "inline";
       var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = connOn[key];
       cb.id = "conn" + i; cb.addEventListener("change", function () { connOn[key] = cb.checked; rebuild(); });
       var lab = document.createElement("label"); lab.setAttribute("for", cb.id); lab.textContent = c.label;
-      left.appendChild(cb); left.appendChild(lab);
-      var meta = document.createElement("span"); meta.className = "meta";
-      meta.textContent = c.side + " " + c.w + "x" + c.h;
-      wrap.appendChild(left); wrap.appendChild(meta); list.appendChild(wrap);
+      var meta = document.createElement("span"); meta.className = "meta"; meta.textContent = c.side;
+      head.appendChild(cb); head.appendChild(lab); head.appendChild(meta);
+      card.appendChild(head);
+      var grid = document.createElement("div"); grid.className = "conngrid";
+      [["off", "offset", v.off], ["z", "height", v.z], ["w", "width", v.w], ["h", "tall", v.h]].forEach(function (f) {
+        var wrap = document.createElement("label"); wrap.className = "connf"; wrap.textContent = f[1];
+        var inp = document.createElement("input"); inp.type = "number"; inp.step = "0.5"; inp.value = f[2];
+        inp.setAttribute("aria-label", c.label + " " + f[1]);
+        inp.addEventListener("input", function () {
+          var val = parseFloat(inp.value); if (!isFinite(val)) return;
+          (connEdit[key] = connEdit[key] || {})[f[0]] = val; scheduleRebuild();
+        });
+        wrap.appendChild(inp); grid.appendChild(wrap);
+      });
+      card.appendChild(grid); list.appendChild(card);
     });
   }
 
@@ -2066,12 +2092,13 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
       if (customConns.length) cfg.connectors = customConns.map(function (c) {
         return { label: c.label, side: c.side, off: c.off, z: c.z, w: c.w, h: c.h, shape: c.shape, on: true }; });
     }
-    // connector on/off overrides (named-board ports)
+    // connector on/off + position/size overrides (named-board ports)
     if (b.connectors && b.connectors.length && boardSel.value !== "generic") {
       cfg.connectors = b.connectors.map(function (c, i) {
-        var key = boardSel.value + "|" + c.label + i;
+        var key = connKey(i, c), v = connVals(key, c);
         var copy = {}; for (var k in c) copy[k] = c[k];
         copy.on = connOn[key] !== undefined ? connOn[key] : (c.on !== false);
+        copy.off = v.off; copy.z = v.z; copy.w = v.w; copy.h = v.h;
         return copy;
       });
     }
@@ -2332,7 +2359,11 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
         return { label: cc.label, side: cc.side, w: cc.w, h: cc.h, off: cc.off || 0, z: cc.z || 3, shape: cc.shape || "rect" }; });
     }
     renderCustom();
-    if (c.connectors && c.board !== "generic") c.connectors.forEach(function (cc, i) { connOn[c.board + "|" + cc.label + i] = cc.on !== false; });
+    if (c.connectors && c.board !== "generic") c.connectors.forEach(function (cc, i) {
+      var key = c.board + "|" + cc.label + i;
+      connOn[key] = cc.on !== false;
+      connEdit[key] = { off: cc.off, z: cc.z, w: cc.w, h: cc.h };
+    });
     refreshConnList(); syncRangeLabels(); rebuild();
   }
   function setNum(id, v, d) { $(id).value = (v === undefined || v === null) ? d : v; }

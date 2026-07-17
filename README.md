@@ -52,11 +52,13 @@ Nano, and a fully parametric generic project box.
 thickness, and standoff, then add your own mounting holes and port cutouts. The whole
 custom board is saved in the `.case` project so you can reuse it.
 
-Board dimensions are typical starting points. Verify against the official mechanical
-drawing before your first real print. The connector panel lets you toggle each port and
-shows its size. If a cutout does not fit the wall, or two cutouts overlap, SCABBARD drops
-the offending one and tells you in the warnings strip rather than emitting broken
-geometry. This is COOPER's lesson carried over: block, do not corrupt.
+Board dimensions and connector positions are typical starting points. Verify against the
+official mechanical drawing before your first real print. The connector panel lets you
+toggle each port and edit its offset along the wall, height above the PCB, and cutout size,
+so you can measure your own board and dial each cutout in exactly; the values save with the
+project. If a cutout does not fit the wall, or two cutouts overlap, SCABBARD drops the
+offending one and tells you in the warnings strip rather than emitting broken geometry.
+This is COOPER's lesson carried over: block, do not corrupt.
 
 ## Height and fit
 
