@@ -5,7 +5,7 @@
 (function (root) {
   "use strict";
 
-  var ENGINE_VERSION = "1.2.2";
+  var ENGINE_VERSION = "2.0.0";
 
   /* ---------------------------------------------------------------- vec */
   function v3(x, y, z) { return [x, y, z]; }
@@ -835,6 +835,167 @@
 
   root.SCAB_STL = { meshToBinarySTL: meshToBinarySTL, meshToAsciiSTL: meshToAsciiSTL, parseBinarySTL: parseBinarySTL, meshTo3MF: meshTo3MF };
   root.SCAB_CHECK = { checkManifold: checkManifold, meshVolume: meshVolume, bounds: bounds };
+
+  /* ================================================================ CSG
+     Hand-rolled BSP constructive solid geometry (subtract / union / intersect),
+     no libraries. Classic BSP CSG: partition space by face planes, clip one
+     solid's faces against the other, recombine. Operates on triangle soup.
+     BSP CSG is weakest on coplanar faces, so cutters are built to OVERHANG the
+     surface they cut (never flush), which sidesteps that case. Every result is
+     handed back to checkManifold by the caller, which falls back to the safe
+     by-construction geometry if a boolean ever comes out unclosed. */
+  var CSG_EPS = 1e-5;
+  var CO = 0, FR = 1, BK = 2, SP = 3; // coplanar, front, back, spanning
+
+  function csgPlaneOf(poly) {
+    var a = poly[0], b = poly[1], c = poly[2];
+    var ux = b[0]-a[0], uy = b[1]-a[1], uz = b[2]-a[2];
+    var vx = c[0]-a[0], vy = c[1]-a[1], vz = c[2]-a[2];
+    var nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+    var L = Math.hypot(nx, ny, nz) || 1; nx/=L; ny/=L; nz/=L;
+    return [nx, ny, nz, nx*a[0] + ny*a[1] + nz*a[2]];
+  }
+  // split polygon by plane into coplanarFront/coplanarBack/front/back lists
+  function csgSplit(plane, poly, cf, cb, front, back) {
+    var nx = plane[0], ny = plane[1], nz = plane[2], w = plane[3];
+    var ptype = 0, types = [];
+    for (var i = 0; i < poly.length; i++) {
+      var v = poly[i], t = nx*v[0] + ny*v[1] + nz*v[2] - w;
+      var ty = (t < -CSG_EPS) ? BK : (t > CSG_EPS) ? FR : CO;
+      ptype |= ty; types.push(ty);
+    }
+    if (ptype === CO) {
+      var pn = csgPlaneOf(poly);
+      (nx*pn[0] + ny*pn[1] + nz*pn[2] > 0 ? cf : cb).push(poly);
+    } else if (ptype === FR) { front.push(poly); }
+    else if (ptype === BK) { back.push(poly); }
+    else { // spanning: cut the polygon along the plane
+      var f = [], b = [];
+      for (var j = 0; j < poly.length; j++) {
+        var k = (j + 1) % poly.length, tj = types[j], tk = types[k], vj = poly[j], vk = poly[k];
+        if (tj !== BK) f.push(vj);
+        if (tj !== FR) b.push(vj);
+        if ((tj | tk) === SP) {
+          var dj = nx*vj[0]+ny*vj[1]+nz*vj[2]-w, dk = nx*vk[0]+ny*vk[1]+nz*vk[2]-w;
+          var s = dj / (dj - dk);
+          var mid = [vj[0]+s*(vk[0]-vj[0]), vj[1]+s*(vk[1]-vj[1]), vj[2]+s*(vk[2]-vj[2])];
+          f.push(mid); b.push(mid);
+        }
+      }
+      if (f.length >= 3) front.push(f);
+      if (b.length >= 3) back.push(b);
+    }
+  }
+  function csgFlip(poly) { return poly.slice().reverse(); }
+
+  // BSP node
+  function CsgNode(polys) { this.plane = null; this.front = null; this.back = null; this.polys = []; if (polys) this.build(polys); }
+  CsgNode.prototype.invert = function () {
+    for (var i = 0; i < this.polys.length; i++) this.polys[i] = csgFlip(this.polys[i]);
+    if (this.plane) this.plane = [-this.plane[0], -this.plane[1], -this.plane[2], -this.plane[3]];
+    if (this.front) this.front.invert();
+    if (this.back) this.back.invert();
+    var t = this.front; this.front = this.back; this.back = t;
+  };
+  CsgNode.prototype.clip = function (polys) {
+    if (!this.plane) return polys.slice();
+    var front = [], back = [];
+    for (var i = 0; i < polys.length; i++) csgSplit(this.plane, polys[i], front, back, front, back);
+    if (this.front) front = this.front.clip(front); else front = front;
+    if (this.back) back = this.back.clip(back); else back = [];
+    return front.concat(back);
+  };
+  CsgNode.prototype.clipTo = function (node) {
+    this.polys = node.clip(this.polys);
+    if (this.front) this.front.clipTo(node);
+    if (this.back) this.back.clipTo(node);
+  };
+  CsgNode.prototype.allPolys = function () {
+    var out = this.polys.slice();
+    if (this.front) out = out.concat(this.front.allPolys());
+    if (this.back) out = out.concat(this.back.allPolys());
+    return out;
+  };
+  CsgNode.prototype.build = function (polys) {
+    if (!polys.length) return;
+    if (!this.plane) this.plane = csgPlaneOf(polys[0]);
+    var front = [], back = [];
+    for (var i = 0; i < polys.length; i++) csgSplit(this.plane, polys[i], this.polys, this.polys, front, back);
+    if (front.length) { if (!this.front) this.front = new CsgNode(); this.front.build(front); }
+    if (back.length) { if (!this.back) this.back = new CsgNode(); this.back.build(back); }
+  };
+
+  function meshToPolys(mesh) {
+    var V = mesh.verts, T = mesh.tris, p = [];
+    for (var i = 0; i < T.length; i += 3) { var a = T[i]*3, b = T[i+1]*3, c = T[i+2]*3;
+      p.push([[V[a],V[a+1],V[a+2]], [V[b],V[b+1],V[b+2]], [V[c],V[c+1],V[c+2]]]); }
+    return p;
+  }
+  function polysToMesh(polys) {
+    var m = new Mesh();
+    for (var i = 0; i < polys.length; i++) { var poly = polys[i];        // fan-triangulate
+      for (var j = 1; j + 1 < poly.length; j++) m.triP(poly[0], poly[j], poly[j+1]); }
+    return m;
+  }
+  // BSP CSG leaves T-junctions (a cut edge on one side meets two faces on the
+  // other), which are geometrically watertight but topologically open. This pass
+  // welds vertices and, for every triangle edge, inserts any other vertex that
+  // lies on it, re-fanning the triangle so edges pair up. Result is manifold.
+  function healTJunctions(mesh) {
+    var V = mesh.verts, T = mesh.tris, uniq = [], key2i = Object.create(null);
+    function ui(x, y, z) { var k = x.toFixed(4) + "," + y.toFixed(4) + "," + z.toFixed(4);
+      var idx = key2i[k]; if (idx === undefined) { idx = uniq.length; key2i[k] = idx; uniq.push([x, y, z]); } return idx; }
+    var tris = [];
+    for (var t = 0; t < T.length; t += 3) {
+      var a = T[t]*3, b = T[t+1]*3, c = T[t+2]*3;
+      var ia = ui(V[a],V[a+1],V[a+2]), ib = ui(V[b],V[b+1],V[b+2]), ic = ui(V[c],V[c+1],V[c+2]);
+      if (ia !== ib && ib !== ic && ic !== ia) tris.push([ia, ib, ic]); // drop degenerates
+    }
+    function onSeg(p, q, r) { // is r strictly between p and q (collinear)?
+      var dx = q[0]-p[0], dy = q[1]-p[1], dz = q[2]-p[2];
+      var ex = r[0]-p[0], ey = r[1]-p[1], ez = r[2]-p[2];
+      var cx = dy*ez - dz*ey, cy = dz*ex - dx*ez, cz = dx*ey - dy*ex;
+      if (cx*cx + cy*cy + cz*cz > 1e-6) return -1;           // not collinear
+      var len2 = dx*dx + dy*dy + dz*dz; if (len2 < 1e-9) return -1;
+      var s = (ex*dx + ey*dy + ez*dz) / len2;
+      return (s > 1e-4 && s < 1 - 1e-4) ? s : -1;
+    }
+    var out = new Mesh();
+    for (var ti = 0; ti < tris.length; ti++) {
+      var tri = tris[ti], loop = [];
+      for (var e = 0; e < 3; e++) {
+        var i = tri[e], j = tri[(e + 1) % 3]; loop.push(uniq[i]);
+        var mids = [];
+        for (var k = 0; k < uniq.length; k++) { if (k === i || k === j) continue;
+          var s = onSeg(uniq[i], uniq[j], uniq[k]); if (s >= 0) mids.push([s, uniq[k]]); }
+        mids.sort(function (x, y) { return x[0] - y[0]; });
+        for (var mi = 0; mi < mids.length; mi++) loop.push(mids[mi][1]);
+      }
+      for (var f = 1; f + 1 < loop.length; f++) out.triP(loop[0], loop[f], loop[f+1]); // fan
+    }
+    return out;
+  }
+
+  // A minus B (both meshes). Returns a new Mesh.
+  function csgSubtract(meshA, meshB) {
+    var a = new CsgNode(meshToPolys(meshA)), b = new CsgNode(meshToPolys(meshB));
+    a.invert(); a.clipTo(b); b.clipTo(a); b.invert(); b.clipTo(a); b.invert();
+    a.build(b.allPolys()); a.invert();
+    return healTJunctions(polysToMesh(a.allPolys()));
+  }
+  function csgUnion(meshA, meshB) {
+    var a = new CsgNode(meshToPolys(meshA)), b = new CsgNode(meshToPolys(meshB));
+    a.clipTo(b); b.clipTo(a); b.invert(); b.clipTo(a); b.invert();
+    a.build(b.allPolys());
+    return healTJunctions(polysToMesh(a.allPolys()));
+  }
+  function csgIntersect(meshA, meshB) {
+    var a = new CsgNode(meshToPolys(meshA)), b = new CsgNode(meshToPolys(meshB));
+    a.invert(); b.clipTo(a); b.invert(); a.clipTo(b); b.clipTo(a);
+    a.build(b.allPolys()); a.invert();
+    return healTJunctions(polysToMesh(a.allPolys()));
+  }
+  root.SCAB_CSG = { subtract: csgSubtract, union: csgUnion, intersect: csgIntersect, heal: healTJunctions, CSG_VERSION: "2.0.0" };
   root.SCAB_MESH = Mesh;
   root.SCAB_2D = { roundedRectPts: roundedRectPts, circlePts: circlePts, rectPts: rectPts, polyArea: polyArea };
   root.SCAB_VERSION = ENGINE_VERSION;
@@ -1045,15 +1206,21 @@
   }
 
   // DIN-rail cradle on the bottom: two inward-hooking lips 35mm apart (TS35).
-  // Clips on by a slight flex; a fixed cradle, not a sprung clip.
-  function buildDinCradle(mesh, W, D, along, len) {
-    var span = 35, gap = span / 2, lipT = 2.2, hook = 1.6, drop = 6.5, hookH = 2.2;
+  // Fixed cradle by default; sprung makes the lips thin and adds a snap lead-in
+  // so the clip flexes onto the rail.
+  function buildDinCradle(mesh, W, D, along, len, sprung) {
+    var span = 35, gap = span / 2, lipT = sprung ? 1.4 : 2.2, hook = 1.6;
+    var drop = sprung ? 8.5 : 6.5, hookH = 2.2, lead = sprung ? 1.0 : 0;
     len = Math.min(len || Math.min(W, D) * 0.6, D - 8);
     var x0 = along - len / 2, x1 = along + len / 2;
-    // profile in (y, z), z=0 at box bottom growing downward (negative z)
-    // left lip hooks in +y, right lip hooks in -y
+    // profile in (y, z), z=0 at box bottom growing downward (negative z).
+    // sprung adds a chamfered lead-in on the outer-bottom of the hook for snap-on.
     function lip(sign) {
       var yOuter = sign * (gap + lipT), yInner = sign * gap, yHook = sign * (gap - hook);
+      if (lead > 0) return [
+        [yOuter, 0], [yOuter, -drop + hookH + lead], [yHook, -drop], [yHook, -drop + hookH],
+        [yInner, -drop + hookH], [yInner, 0]
+      ];
       return [
         [yOuter, 0], [yOuter, -drop], [yHook, -drop], [yHook, -drop + hookH],
         [yInner, -drop + hookH], [yInner, 0]
@@ -1071,6 +1238,42 @@
   function ensurePolyCCWYZ(p) {
     var area = 0; for (var i = 0; i < p.length; i++) { var a = p[i], b = p[(i + 1) % p.length]; area += a[0] * b[1] - b[0] * a[1]; }
     return area < 0 ? p.slice().reverse() : p;
+  }
+
+  // VESA backplate on the bottom: a flat plate (extends to the bolt pattern if the
+  // box is smaller) with four through-holes at the 75 or 100mm square. Built as a
+  // slab with holes, like a lid, and appended as its own body.
+  function buildVesaPlate(mesh, W, D, pattern, screw, thk) {
+    var margin = screw + 6;
+    var pW = Math.max(W, pattern + 2 * margin), pD = Math.max(D, pattern + 2 * margin);
+    var contour = roundedRectPts(pW, pD, 4, 6);
+    var sr = (screw + 0.6) / 2, half = pattern / 2;
+    var holes = [circlePts(half, half, sr, 24), circlePts(-half, half, sr, 24),
+                 circlePts(half, -half, sr, 24), circlePts(-half, -half, sr, 24)];
+    var z0 = -thk, z1 = 0.6; // overlap up into the base bottom so it fuses
+    mesh.beginBody("vesa");
+    fillPolygon(mesh, contour, holes, function (x, y) { return [x, y, z1]; }, false);
+    fillPolygon(mesh, contour, holes, function (x, y) { return [x, y, z0]; }, true);
+    for (var e = 0; e < contour.length; e++) { var a = contour[e], b = contour[(e + 1) % contour.length];
+      mesh.quadP([a[0], a[1], z0], [b[0], b[1], z0], [b[0], b[1], z1], [a[0], a[1], z1]); }
+    for (var s = 0; s < holes.length; s++) { var loop = holes[s];
+      for (var k = 0; k < loop.length; k++) { var c = loop[k], d2 = loop[(k + 1) % loop.length];
+        mesh.quadP([c[0], c[1], z0], [c[0], c[1], z1], [d2[0], d2[1], z1], [d2[0], d2[1], z0]); } }
+    mesh.endBody();
+  }
+
+  // Cable-tie saddle (strain relief): an arch (open at the bottom) swept along x,
+  // so a cable and a zip tie pass through the tunnel under the bar. Profile in
+  // (y,z), centred at y=off, sitting on the floor at z=floorZ.
+  function buildSaddle(mesh, off, floorZ, cableW, x0, x1) {
+    var lw = 2, tt = 2, cw = Math.max(cableW, 3), ch = cw * 0.85;
+    var Wb = cw + 2 * lw, Hb = ch + tt;
+    var prof = [[-Wb/2, 0], [-Wb/2, Hb], [Wb/2, Hb], [Wb/2, 0], [Wb/2 - lw, 0],
+                [Wb/2 - lw, Hb - tt], [-Wb/2 + lw, Hb - tt], [-Wb/2 + lw, 0]];
+    prof = prof.map(function (p) { return [p[0] + off, p[1] + floorZ]; });
+    mesh.beginBody("relief");
+    sweepProfileX(mesh, prof, x0, x1);
+    mesh.endBody();
   }
   // copy a temp mesh's triangles into dst as a fresh (non-welded) body, so an
   // overlapping add-on never welds to the shell and flips shared edges.
@@ -1129,16 +1332,41 @@
       }
     }
 
-    // --- slab body (with holes, watertight) ---
-    m.beginBody("lid");
-    fillPolygon(m, outer, holes, function (x, y) { return [x, y, zTop]; }, false); // top up
-    fillPolygon(m, outer, holes, function (x, y) { return [x, y, z0]; }, true);    // bottom down
+    // --- slab body (with holes, watertight), optionally recess-pocketed via CSG ---
+    var slabM = new Mesh();
+    fillPolygon(slabM, outer, holes, function (x, y) { return [x, y, zTop]; }, false); // top up
+    fillPolygon(slabM, outer, holes, function (x, y) { return [x, y, z0]; }, true);    // bottom down
     for (var e = 0; e < outer.length; e++) { var a = outer[e], b = outer[(e + 1) % outer.length];
-      m.quadP([a[0], a[1], z0], [b[0], b[1], z0], [b[0], b[1], zTop], [a[0], a[1], zTop]); } // outer wall
+      slabM.quadP([a[0], a[1], z0], [b[0], b[1], z0], [b[0], b[1], zTop], [a[0], a[1], zTop]); } // outer wall
     for (var s = 0; s < holes.length; s++) { var loop = holes[s];
       for (var k = 0; k < loop.length; k++) { var c = loop[k], d2 = loop[(k + 1) % loop.length];
-        m.quadP([c[0], c[1], z0], [c[0], c[1], zTop], [d2[0], d2[1], zTop], [d2[0], d2[1], z0]); } } // hole tunnels
-    m.endBody();
+        slabM.quadP([c[0], c[1], z0], [c[0], c[1], zTop], [d2[0], d2[1], zTop], [d2[0], d2[1], z0]); } } // hole tunnels
+    // rectangular recess pocket in the lid top, cut with the CSG engine. A single
+    // box cutter that overhangs the top surface is the case BSP CSG handles cleanly.
+    // Validated after the cut; if it is not watertight and manifold, it is skipped.
+    if (cfg.lidPocket && cfg.lidPocket.w > 0 && cfg.lidPocket.h > 0) {
+      var pd = Math.min(cfg.lidPocket.depth || 1.5, lidThk - 0.6);
+      var cut = new Mesh();
+      extrudeContour(cut, rectPts(cfg.lidPocket.x || 0, cfg.lidPocket.y || 0, cfg.lidPocket.w, cfg.lidPocket.h), zTop - pd, zTop + 0.4);
+      var res = csgSubtract(slabM, cut), pc = checkManifold(res);
+      if (pc.closed && pc.manifold && pc.consistent && meshVolume(res) > 0) slabM = res;
+      else if (m.warn) m.warn.push("Lid pocket skipped: the cut did not come out clean. Move it clear of the window and screw holes, or resize it.");
+    }
+    appendRaw(m, slabM, "lid");
+
+    // --- gasket bead on the underside: a ring that seats into the base rim groove ---
+    if (cfg.gasket && cfg.gasket.on) {
+      var gw = Math.min(cfg.gasket.width || 1.6, wall * 0.6), bw = Math.max(0.6, gw - 0.5);
+      if ((wall - gw) / 2 >= 0.5) {
+        var bh = Math.min((cfg.gasket.depth || 1.5) * 0.7, 1.2);
+        var midIn = wall / 2; // groove centre inset from the outer edge
+        var beadO = roundedRectPts(W - 2 * (midIn - bw / 2), D - 2 * (midIn - bw / 2), Math.max(0.3, r - (midIn - bw / 2)), arc);
+        var beadI = roundedRectPts(W - 2 * (midIn + bw / 2), D - 2 * (midIn + bw / 2), Math.max(0.3, r - (midIn + bw / 2)), arc);
+        m.beginBody("bead");
+        ringPrism(m, beadO, beadI, -bh, z0 + 0.001);
+        m.endBody();
+      }
+    }
 
     // --- tongue ring (snap / friction) as its own watertight body ---
     if (cfg.lidAttach === "snap" || cfg.lidAttach === "friction") {
@@ -1344,6 +1572,51 @@
       connectors: [ { label: "USB", side: "left", off: 0, z: 2.0, w: 8, h: 3.2, on: true } ],
       note: "NOMINAL: most Nanos have no mounting holes (breadboard part). USB type varies; verify."
     },
+    pico: {
+      name: "Raspberry Pi Pico / Pico 2 (W)", W: 51, D: 21, pcb: 1.0, holeDia: 2.1, standoff: 4, headerStack: 4,
+      holes: [ { x: -23.5, y: -5.7, screw: 2 }, { x: 23.5, y: -5.7, screw: 2 }, { x: -23.5, y: 5.7, screw: 2 }, { x: 23.5, y: 5.7, screw: 2 } ],
+      connectors: [ { label: "USB", side: "left", off: 0, z: 1.0, w: 8, h: 3.0, on: true } ],
+      note: "NOMINAL: 47x11.4 mm hole pattern. USB is micro-B on Pico, USB-C on some clones; verify."
+    },
+    teensy41: {
+      name: "Teensy 4.1", W: 61, D: 18, pcb: 1.6, standoff: 4, headerStack: 6,
+      holes: [ { x: -28, y: 0, screw: 2 }, { x: 28, y: 0, screw: 2 } ],
+      connectors: [
+        { label: "USB", side: "left", off: 0, z: 1.5, w: 8, h: 3.0, on: true },
+        { label: "microSD", side: "right", off: 0, z: 0, w: 12, h: 2.5, on: false }
+      ],
+      note: "NOMINAL: 61x18 mm. Most Teensy 4.1 boards have no mounting holes; positions are approximate."
+    },
+    nucleo64: {
+      name: "ST Nucleo-64", W: 82.5, D: 70, pcb: 1.6, holeDia: 3.2, standoff: 8, headerStack: 12,
+      holes: [ { x: -36, y: -30, screw: 3 }, { x: 36, y: -30, screw: 3 }, { x: -36, y: 30, screw: 3 }, { x: 36, y: 30, screw: 3 } ],
+      connectors: [
+        { label: "ST-Link USB", side: "back", off: 0, z: 4, w: 8, h: 3.5, on: true },
+        { label: "Power jack", side: "back", off: -20, z: 5, w: 9, h: 11, shape: "round", on: false }
+      ],
+      note: "NOMINAL: Nucleo-64 outline with Arduino + Morpho headers; verify hole pattern and ST-Link USB (mini-B) position."
+    },
+    giga: {
+      name: "Arduino Giga R1 WiFi", W: 101.6, D: 53.34, pcb: 1.6, holeDia: 3.2, standoff: 6, headerStack: 9,
+      holes: [ { x: -46, y: -18, screw: 3 }, { x: 46, y: -18, screw: 3 }, { x: 46, y: 18, screw: 3 }, { x: -46, y: 18, screw: 3 } ],
+      connectors: [
+        { label: "USB-C", side: "left", off: 16, z: 1.8, w: 9.5, h: 3.5, on: true },
+        { label: "USB-A", side: "left", off: 2, z: 3.0, w: 13, h: 6, on: true },
+        { label: "Audio 3.5mm", side: "left", off: -14, z: 3.0, w: 7, h: 7, shape: "round", on: false }
+      ],
+      note: "NOMINAL: Mega/Due form factor (101.6x53.34). USB-C, USB-A host, and 3.5mm audio on one short edge; verify offsets. Mounting holes approximate."
+    },
+    giga_display: {
+      name: "Arduino Giga R1 + Display Shield", W: 101.6, D: 53.34, pcb: 1.6, holeDia: 3.2, standoff: 6, headerStack: 20,
+      holes: [ { x: -46, y: -18, screw: 3 }, { x: 46, y: -18, screw: 3 }, { x: 46, y: 18, screw: 3 }, { x: -46, y: 18, screw: 3 } ],
+      connectors: [
+        { label: "USB-C", side: "left", off: 16, z: 1.8, w: 9.5, h: 3.5, on: true },
+        { label: "USB-A", side: "left", off: 2, z: 3.0, w: 13, h: 6, on: true },
+        { label: "Audio 3.5mm", side: "left", off: -14, z: 3.0, w: 7, h: 7, shape: "round", on: false }
+      ],
+      display: { w: 87, h: 52 },
+      note: "NOMINAL: Giga R1 with the Display Shield stacked (3.97\" 480x800 touch). Taller stack for the shield; use the display preset for the lid window, then size it to your glass. Verify everything."
+    },
     generic: {
       name: "Generic project box", W: 80, D: 60, pcb: 1.6, standoff: 5, headerStack: 0,
       holes: [ { x: -30, y: -22, screw: 3 }, { x: 30, y: -22, screw: 3 }, { x: -30, y: 22, screw: 3 }, { x: 30, y: 22, screw: 3 } ],
@@ -1448,6 +1721,16 @@
         u: cu + sp[sfi][0], z: cz + sp[sfi][1], w: 3.4, h: 3.4 });
     }
 
+    // cable glands: round sized holes on a wall (thread OD of the gland).
+    // GLAND_DIA presets live in the UI; here we take an explicit diameter.
+    if (cfg.glands && cfg.glands.length) {
+      for (var gi = 0; gi < cfg.glands.length; gi++) {
+        var g = cfg.glands[gi]; if (!wallFeatures[g.side]) continue;
+        var gd = g.dia || 12.5, gu = runLen[g.side] / 2 + (g.off || 0), gz = zCav + (g.z != null ? g.z : interiorH / 2);
+        wallFeatures[g.side].push({ label: "gland", kind: "through", shape: "round", u: gu, z: gz, w: gd, h: gd });
+      }
+    }
+
     // foot recesses (4 corners of the bottom)
     var footRecesses = [];
     if (cfg.feet !== false) {
@@ -1520,15 +1803,35 @@
     }
     // DIN-rail cradle on the bottom, running along the long axis.
     if (cfg.din) {
-      var tdin = new Mesh();
-      if (W >= D) { buildDinCradle(tdin, W, D, 0, cfg.din.len || W * 0.6); appendRaw(base, tdin, "din"); }
-      else { buildDinCradle(tdin, D, W, 0, cfg.din.len || D * 0.6); appendRaw(base, tdin, "din", { swapXY: true }); }
+      var tdin = new Mesh(), spr = !!cfg.din.sprung;
+      if (W >= D) { buildDinCradle(tdin, W, D, 0, cfg.din.len || W * 0.6, spr); appendRaw(base, tdin, "din"); }
+      else { buildDinCradle(tdin, D, W, 0, cfg.din.len || D * 0.6, spr); appendRaw(base, tdin, "din", { swapXY: true }); }
+    }
+    // VESA backplate on the bottom (75 or 100mm pattern).
+    if (cfg.vesa && cfg.vesa.pattern) {
+      var tv = new Mesh();
+      buildVesaPlate(tv, W, D, cfg.vesa.pattern, cfg.vesa.screw || 4, cfg.vesa.thk || Math.max(floor, 3));
+      appendRaw(base, tv, "vesa");
+    }
+    // cable-tie strain-relief saddles just inside a gland's wall.
+    if (cfg.glands && cfg.glands.length) {
+      var reliefLen = Math.min(12, Math.min(W, D) * 0.35);
+      for (var ri = 0; ri < cfg.glands.length; ri++) {
+        var gg = cfg.glands[ri]; if (!gg.relief || !wallFeatures[gg.side]) continue;
+        var cableW = (gg.dia || 12.5) * 0.7, ts = new Mesh();
+        // build tunnel along x; for front/back re-aim with swapXY
+        if (gg.side === "left") buildSaddle(ts, gg.off || 0, floor, cableW, -W/2 + wall + 1, -W/2 + wall + 1 + reliefLen);
+        else if (gg.side === "right") buildSaddle(ts, gg.off || 0, floor, cableW, W/2 - wall - 1 - reliefLen, W/2 - wall - 1);
+        else if (gg.side === "front") buildSaddle(ts, gg.off || 0, floor, cableW, -D/2 + wall + 1, -D/2 + wall + 1 + reliefLen);
+        else buildSaddle(ts, gg.off || 0, floor, cableW, D/2 - wall - 1 - reliefLen, D/2 - wall - 1);
+        appendRaw(base, ts, "relief", { swapXY: (gg.side === "front" || gg.side === "back") });
+      }
     }
 
     // --- lid ---
     var lid = buildLid({ W: W, D: D, wall: wall, lidThk: lidThk, nozzle: nozzle,
       lidAttach: cfg.lidAttach || "snap", lipH: cfg.lipH || 4, lidScrew: cfg.lidScrew || 3,
-      lidWindow: cfg.lidWindow, lidFan: cfg.lidFan, text: cfg.text }, geo);
+      lidWindow: cfg.lidWindow, lidFan: cfg.lidFan, lidPocket: cfg.lidPocket, gasket: cfg.gasket, text: cfg.text }, geo);
     (lid.warn || []).forEach(function (w) { warn.push(w); });
 
     // --- coupon ---
