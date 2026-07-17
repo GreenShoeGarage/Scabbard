@@ -27,12 +27,15 @@ export, the isometric preview) is hand-rolled in the one file.
   stick-on bumpers, and connector cutouts on the walls.
 - **Lid**: snap-fit tongue, friction tongue, or screw-down corners. Screw-down adds
   matching corner posts in the base with self-tap pilot bores. Optional raised or
-  embossed text.
+  embossed lid text, an LED window, and a lid-mounted fan (opening plus mounting holes
+  at the standard pitch for the fan size).
+- **Wall text**: a raised legend on the outside of any wall.
 - **Fit-test coupon**: a small clearance ladder and a self-tap boss so you can dial in
   your printer's real tolerance before committing to the full case.
 
-Export each as a binary STL. Save the whole configuration as a `.case` project file and
-re-open it later.
+Export each part as a binary STL, or export the base and lid together as a **3MF** where
+each is a separate object the slicer can arrange. Save the whole configuration as a
+`.case` project file and re-open it later.
 
 ## Boards
 
@@ -76,18 +79,27 @@ Each release saved as its own file. GPL-3.0.
 - **Board data is nominal.** Dimensions and connector positions are typical values, not
   measured from every revision. Print the fit-test coupon and check a dry fit before a
   full run. Verify against the mechanical drawing.
-- **Text is single-stroke.** The lid legend uses a simple vector stroke font sized for
+- **Text is single-stroke.** The legend uses a simple vector stroke font sized for
   legibility at FDM resolution, not a full outline typeface. Keep strings short.
+- **Wall text is raised only.** A raised legend sits proud of the wall as its own body.
+  Recessed (embossed) wall text needs a true pocket carved into the wall, which requires
+  boolean subtraction and is not in this engine. Lid emboss recesses into the solid lid;
+  wall emboss does not exist yet.
 - **No boolean CSG.** Cutouts are placed by construction, not subtracted. Overlapping or
   ill-fitting cutouts are dropped with a warning rather than merged. If you need two
   cutouts to share an opening, model it as one wider cutout.
-- **STL only.** No 3MF or STEP yet. STL carries no units label, so confirm your slicer
-  imports in millimetres.
-- **Fan on a wall, not the lid.** The fan mount lands on a side wall. On a short case a
-  40 mm fan will not fit a side wall and is dropped. Lid-mounted fans are not in v1.0.
+- **Vent auto-layout routes around the exit slot, not every connector.** Vents will move
+  to the clear side of a GPIO exit slot on the same wall, and the count shrinks to fit.
+  A vent that still lands on a connector cutout is dropped with a warning rather than
+  merged. Full connector-aware nesting is future work.
+- **STL and 3MF, no STEP.** 3MF carries units and separate objects; STL does not, so if
+  you export STL confirm your slicer imports in millimetres.
+- **Fan fit is enforced.** A wall fan that will not fit a short wall, or a lid fan whose
+  mounting pattern would fall off the lid, is left off with a warning. Put a big fan on a
+  bigger case.
 - **Not a slicer.** Wall thickness, bosses, and clearances are print-aware, but supports,
   infill, orientation, and material are your slicer's job.
-- **PWA layer deferred.** v1.0 is disk-first only. A service worker cannot register from
+- **PWA layer deferred.** Disk-first only. A service worker cannot register from
   `file://`, so offline caching is a later, additive concern, never load-bearing.
 
 ## Files
@@ -95,7 +107,7 @@ Each release saved as its own file. GPL-3.0.
 - `index.html` : the instrument. This is the release.
 - `engine.js` : the geometry engine, embedded into `index.html` at build. Kept separate
   for the Node test harnesses.
-- `test.js`, `test-model.js` : Node assertion harnesses. Run `node test.js` and
-  `node test-model.js`.
+- `test.js`, `test-model.js`, `test-v11.js` : Node assertion harnesses. Run each with
+  `node <file>`. `test-v11.js` covers wall text, the lid fan, and 3MF.
 
 Make. Hack. Learn. Share. Repeat.
