@@ -5,7 +5,7 @@
 (function (root) {
   "use strict";
 
-  var ENGINE_VERSION = "1.1.0";
+  var ENGINE_VERSION = "1.2.1";
 
   /* ---------------------------------------------------------------- vec */
   function v3(x, y, z) { return [x, y, z]; }

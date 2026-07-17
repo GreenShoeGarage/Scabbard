@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- SCABBARD :: index.html :: v1.2.0 -->
+<!-- SCABBARD :: index.html :: v1.2.1 -->
 <html lang="en" data-theme="night">
 <head>
 <meta charset="utf-8">
@@ -89,6 +89,8 @@ main { flex:1 1 auto; display:grid; grid-template-columns:minmax(280px,340px) 1f
 .stats b { color:var(--ink); font-weight:600; }
 .viewpills { position:absolute; right:12px; top:12px; display:flex; gap:6px; }
 .viewpills button { padding:5px 9px; min-height:0; font-family:var(--mono); font-size:0.72rem; }
+.viewpills button.toggle { opacity:0.5; text-decoration:line-through; }
+.viewpills button.toggle.on { opacity:1; text-decoration:none; border-color:var(--brass); }
 
 /* ---- control groups ---- */
 .group { border-bottom:1px solid var(--line); }
@@ -153,7 +155,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
   <div class="wordmark">SCABBARD<span class="fi"> ::</span></div>
   <div>
     <div class="tagline">board-fitted enclosure generator</div>
-    <div class="ver">FI-111 &middot; <span id="verNum">v1.2.0</span> &middot; GPL-3.0</div>
+    <div class="ver">FI-111 &middot; <span id="verNum">v1.2.1</span> &middot; GPL-3.0</div>
   </div>
   <div class="grow"></div>
   <div class="tools">
@@ -346,7 +348,10 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
       <button data-view="iso">iso</button>
       <button data-view="top">top</button>
       <button data-view="front">front</button>
+      <button data-view="bottom">bottom</button>
       <button data-view="fit">fit</button>
+      <button data-toggle="base" class="toggle on" id="pillBase">base</button>
+      <button data-toggle="lid" class="toggle on" id="pillLid">lid</button>
     </div>
     <div class="stats" id="stats"></div>
   </section>
@@ -367,7 +372,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
     <button class="close" id="aboutClose" aria-label="Close">Close</button>
     <h2 id="aboutTitle">SCABBARD</h2>
-    <p><b>Field Instrument FI-111</b>, version <span id="aboutVer">1.2.0</span>. A sheath fitted to a blade:
+    <p><b>Field Instrument FI-111</b>, version <span id="aboutVer">1.2.1</span>. A sheath fitted to a blade:
        give it a board and it generates a printable enclosure sized to that board, with mounting bosses,
        connector cutouts, a choice of lid, and text.</p>
     <p>Everything runs on your machine, straight from disk. No server, no account, no upload. Geometry, STL
@@ -405,7 +410,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
 (function (root) {
   "use strict";
 
-  var ENGINE_VERSION = "1.1.0";
+  var ENGINE_VERSION = "1.2.1";
 
   /* ---------------------------------------------------------------- vec */
   function v3(x, y, z) { return [x, y, z]; }
@@ -1960,7 +1965,7 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
 (function () {
   "use strict";
   var SCAB = window.SCAB || window; // engine attaches exports flat onto window
-  var VERSION = "1.2.0";
+  var VERSION = "1.2.1";
   var $ = function (id) { return document.getElementById(id); };
   var dbgOn = false;
   function dbg() {
@@ -2131,14 +2136,16 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
   function hexToRgb(h) { h = h.replace("#", ""); if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
     return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)]; }
 
-  // collect renderable triangles from base + lid (lid lifted and set beside the base)
+  // collect renderable triangles from base + lid (lid set beside the base, right side up)
+  var showBase = true, showLid = true;
   function collectTris() {
     if (!model) return { tris: [], bb: null };
     var out = [];
-    var m = model.meta, gapY = m.D * 0.62 + 12;
-    pushMesh(model.base, out, 0, 0, 0);
-    // place the lid behind the base, flipped so its inside faces up like an open clamshell
-    pushMesh(model.lid, out, 0, gapY, m.height + 8, true);
+    var m = model.meta, gapY = m.D * 0.62 + 14;
+    if (showBase) pushMesh(model.base, out, 0, 0, 0, false);
+    // lid beside the base, same way up as it sits on the box (top up, tongue down)
+    if (showLid) pushMesh(model.lid, out, 0, gapY, 0, false);
+    if (!out.length) return { tris: [], bb: null };
     // bounding box
     var bb = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
     out.forEach(function (t) { for (var i = 0; i < 3; i++) { var p = t.p[i];
@@ -2226,17 +2233,31 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
   cvs.addEventListener("pointermove", function (e) {
     if (!drag) return;
     cam.az += (e.clientX - drag.x) * 0.01; cam.el += (e.clientY - drag.y) * 0.01;
-    cam.el = Math.max(-1.5, Math.min(1.5, cam.el)); drag = { x: e.clientX, y: e.clientY }; draw();
+    // no clamp: full tumble so the bottom is inspectable. keep angles bounded to +/-2pi.
+    var TAU = Math.PI * 2; if (cam.el > TAU) cam.el -= TAU; if (cam.el < -TAU) cam.el += TAU;
+    drag = { x: e.clientX, y: e.clientY }; draw();
   });
   cvs.addEventListener("pointerup", function () { drag = null; });
   cvs.addEventListener("wheel", function (e) { e.preventDefault();
     cam.zoom *= e.deltaY < 0 ? 1.1 : 0.9; cam.zoom = Math.max(0.2, Math.min(6, cam.zoom)); draw(); }, { passive: false });
   Array.prototype.forEach.call(document.querySelectorAll(".viewpills button"), function (btn) {
     btn.addEventListener("click", function () {
+      var tog = btn.getAttribute("data-toggle");
+      if (tog) {
+        if (tog === "base") showBase = !showBase;
+        if (tog === "lid") showLid = !showLid;
+        if (!showBase && !showLid) { // never hide both; re-show the one just toggled off
+          if (tog === "base") showLid = true; else showBase = true;
+        }
+        $("pillBase").classList.toggle("on", showBase);
+        $("pillLid").classList.toggle("on", showLid);
+        fitView(); draw(); return;
+      }
       var v = btn.getAttribute("data-view");
       if (v === "iso") { cam.az = -0.62; cam.el = 0.52; }
       else if (v === "top") { cam.az = 0; cam.el = 1.4; }
       else if (v === "front") { cam.az = 0; cam.el = 0.05; }
+      else if (v === "bottom") { cam.az = 0; cam.el = -1.4; }
       else if (v === "fit") { cam.zoom = 1; fitView(); }
       draw();
     });
