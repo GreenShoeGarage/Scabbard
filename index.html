@@ -2136,15 +2136,17 @@ kbd { font-family:var(--mono); background:var(--sunk); border:1px solid var(--li
   function hexToRgb(h) { h = h.replace("#", ""); if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
     return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)]; }
 
-  // collect renderable triangles from base + lid (lid set beside the base, right side up)
+  // collect renderable triangles from base + lid (lid floats above the base, exploded)
   var showBase = true, showLid = true;
   function collectTris() {
     if (!model) return { tris: [], bb: null };
     var out = [];
-    var m = model.meta, gapY = m.D * 0.62 + 14;
+    var m = model.meta;
     if (showBase) pushMesh(model.base, out, 0, 0, 0, false);
-    // lid beside the base, same way up as it sits on the box (top up, tongue down)
-    if (showLid) pushMesh(model.lid, out, 0, gapY, 0, false);
+    // lid centred above the box, tongue down (mount orientation), lifted clear of it
+    // by 3x the enclosure height so nothing collides in the exploded view.
+    var lift = m.height + m.height * 3; // box top is at m.height; add a 3x gap above it
+    if (showLid) pushMesh(model.lid, out, 0, 0, lift, false);
     if (!out.length) return { tris: [], bb: null };
     // bounding box
     var bb = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
